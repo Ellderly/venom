@@ -256,6 +256,21 @@ public final class AutoTest {
             at(2, () -> PacketDistributor.sendToServer(new Net.UseAbility(Net.UseAbility.DEVOUR)));
             at(5, () -> shot("21_devour"));
         }
+        if (which.contains("fp")) {
+            at(5, () -> {
+                cmd("gamemode creative");
+                cmd("venom form human");
+                cmd("item replace entity @s weapon.mainhand with minecraft:air");
+                mc().options.setCameraType(CameraType.FIRST_PERSON);
+            });
+            at(60, () -> cmd("venom form suit"));
+            at(18, () -> shot("40_fp_suit_transition"));
+            at(40, () -> shot("41_fp_suit"));
+            at(1, () -> mc().player.swing(net.minecraft.world.InteractionHand.MAIN_HAND));
+            at(3, () -> shot("42_fp_suit_swing"));
+            at(20, () -> cmd("venom form venom"));
+            at(20, () -> shot("43_fp_venom_transition"));
+        }
         if (all || which.contains("loop")) {
             // gameplay loop: sonic emitter stuns, sneak-use tears the symbiote off, canister bonds, wild symbiote bonds
             at(5, () -> {
