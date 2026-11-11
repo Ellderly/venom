@@ -139,6 +139,7 @@ public final class SymbioteLogic {
         Net.fx(player, Net.Fx.BOND, player.position());
         goo(player, 60, 0.12);
         whisper(player, "bond");
+        Advance.grant(player, "root");
         player.displayClientMessage(Component.translatable(forced ? "message.venom.bonded_forced" : "message.venom.bonded"), false);
         sync(player);
     }
@@ -228,6 +229,7 @@ public final class SymbioteLogic {
             startTransition(player, d, SymbioteForm.HUMAN);
         }
         if (!was) {
+            Advance.grant(player, "weakened");
             sound(player, ModRegistry.SND_SCREAM, 1.0F, 1.1F);
             player.addEffect(new MobEffectInstance(MobEffects.CONFUSION, Math.min(ticks, 160), 0, false, false));
             player.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, Math.min(ticks, 80), 1, false, false));
@@ -287,6 +289,11 @@ public final class SymbioteLogic {
         };
         MoveState old = move(player);
         MoveState next = ok ? state : MoveState.IDLE;
+        if (next.mode() != old.mode()) {
+            if (next.swinging()) Advance.grant(player, "swing");
+            else if (next.gliding()) Advance.grant(player, "glide");
+            else if (next.clinging() && next.normal() == net.minecraft.core.Direction.DOWN) Advance.grant(player, "ceiling");
+        }
         if (next.swinging() && !old.swinging() && !player.isCreative()) d.biomass = Math.max(0.0F, d.biomass - 0.12F);
         setMove(player, next);
     }
@@ -306,6 +313,7 @@ public final class SymbioteLogic {
                 d.prevForm = d.form;
                 dirty = true;
                 if (d.form == SymbioteForm.VENOM && from != SymbioteForm.VENOM) whisper(player, "venom");
+                if (d.form != SymbioteForm.HUMAN) Advance.grant(player, d.form.id());
             }
             updateScale(player, d);
         }

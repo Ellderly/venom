@@ -41,6 +41,8 @@ public final class LocalMovement {
     public static double ropeLength;
     public static int stateTicks;
 
+    /** Sneak has to be held this long before a jump turns into a leap, so ordinary sneaking stays ordinary. */
+    private static final int LEAP_MIN = 10;
     private static int reattachCooldown;
     private static Vec3 clingVel = Vec3.ZERO;
     private static boolean nextRight = true;
@@ -160,8 +162,8 @@ public final class LocalMovement {
         // ---- super leap: hold sneak on the ground to coil up, jump to release ----
         if (state.mode() == MoveState.NONE && form.atLeast(SymbioteForm.EMPOWERED) && p.onGround() && sneak) {
             chargeTicks++;
-            leapCharge = Mth.clamp((chargeTicks - 6) / 24.0F, 0.0F, 1.0F);
-            if (jumpPressed && chargeTicks >= 6) {
+            leapCharge = Mth.clamp((chargeTicks - LEAP_MIN) / 22.0F, 0.0F, 1.0F);
+            if (jumpPressed && chargeTicks >= LEAP_MIN) {
                 pendingLeap = leapCharge;
                 chargeTicks = 0;
                 leapCharge = 0;
@@ -240,7 +242,9 @@ public final class LocalMovement {
         double bestScore = 0.05;
         for (Direction dir : Direction.Plane.HORIZONTAL) {
             Vec3 v = SurfaceMath.normal(dir);
-            if (level.noCollision(p, bb.move(v.scale(0.1)).deflate(0.0, 0.1, 0.0))) continue;
+            // only the upper body counts: hopping up a one-block step must never glue you to it
+            AABB upper = new AABB(bb.minX, bb.minY + bb.getYsize() * 0.55, bb.minZ, bb.maxX, bb.maxY - 0.05, bb.maxZ);
+            if (level.noCollision(p, upper.move(v.scale(0.1)))) continue;
             double score = v.dot(input) * 1.5 + v.dot(want) * 4.0 + v.dot(look) * 0.6;
             if (score > bestScore) {
                 bestScore = score;

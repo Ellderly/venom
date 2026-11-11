@@ -1,0 +1,23 @@
+{
+  "display": {
+    "icon": {
+      "id": "minecraft:bone"
+    },
+    "title": {
+      "translate": "advancement.venom.devour"
+    },
+    "description": {
+      "translate": "advancement.venom.devour.desc"
+    },
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "done": {
+      "trigger": "minecraft:impossible"
+    }
+  },
+  "parent": "venom:venom"
+}

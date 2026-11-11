@@ -156,6 +156,7 @@ public final class CommonEvents {
         if (stack.is(ModRegistry.CHOCOLATE_BAR.get()) || stack.is(Items.COOKIE)) {
             SymbioteLogic.feed(player, stack.is(Items.COOKIE) ? 9.0F : 22.0F);
             SymbioteLogic.whisper(player, "chocolate");
+            Advance.grant(player, "chocolate");
         } else if (stack.is(Items.BEEF) || stack.is(Items.PORKCHOP) || stack.is(Items.MUTTON) || stack.is(Items.CHICKEN)
                 || stack.is(Items.RABBIT) || stack.is(Items.COD) || stack.is(Items.SALMON) || stack.is(Items.ROTTEN_FLESH)) {
             SymbioteLogic.feed(player, 12.0F);

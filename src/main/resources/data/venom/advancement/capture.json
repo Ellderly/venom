@@ -1,0 +1,23 @@
+{
+  "display": {
+    "icon": {
+      "id": "venom:empty_canister"
+    },
+    "title": {
+      "translate": "advancement.venom.capture"
+    },
+    "description": {
+      "translate": "advancement.venom.capture.desc"
+    },
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "done": {
+      "trigger": "minecraft:impossible"
+    }
+  },
+  "parent": "venom:root"
+}

@@ -35,6 +35,7 @@ public class EmptyCanisterItem extends Item {
         player.level().playSound(null, target.getX(), target.getY(), target.getZ(), ModRegistry.SND_SYMBIOTE_HURT.get(), SoundSource.HOSTILE, 1.0F, 1.2F);
         if (!player.getAbilities().instabuild) stack.shrink(1);
         player.getInventory().placeItemBackInInventory(new ItemStack(ModRegistry.SYMBIOTE_CANISTER.get()));
+        if (player instanceof net.minecraft.server.level.ServerPlayer sp) dev.ellderly.venom.logic.Advance.grant(sp, "capture");
         return InteractionResult.SUCCESS;
     }
 

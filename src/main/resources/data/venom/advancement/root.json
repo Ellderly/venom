@@ -1,0 +1,23 @@
+{
+  "display": {
+    "icon": {
+      "id": "venom:symbiote_canister"
+    },
+    "title": {
+      "translate": "advancement.venom.root"
+    },
+    "description": {
+      "translate": "advancement.venom.root.desc"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": false,
+    "hidden": false,
+    "background": "minecraft:textures/block/sculk.png"
+  },
+  "criteria": {
+    "done": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

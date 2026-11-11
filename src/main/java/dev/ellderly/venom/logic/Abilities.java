@@ -121,6 +121,7 @@ public final class Abilities {
         SymbioteLogic.sound(player, ModRegistry.SND_ROAR, venom ? 3.0F : 2.0F, venom ? 0.75F : 1.05F);
         if (venom) player.level().playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.RAVAGER_ROAR, SoundSource.PLAYERS, 2.0F, 0.55F);
         Net.fx(player, Net.Fx.ROAR, player.position());
+        Advance.grant(player, "roar");
         d.roarCooldown = venom ? 240 : 320;
         spend(player, d, 3.0F);
         SymbioteLogic.sync(player);
@@ -164,6 +165,7 @@ public final class Abilities {
                 player.getFoodData().eat(4, 0.5F);
                 SymbioteLogic.feed(player, 26.0F);
                 SymbioteLogic.whisper(player, "devour");
+                Advance.grant(player, "devour");
                 level.getServer().tell(new TickTask(level.getServer().getTickCount() + 14, () -> {
                     if (player.isAlive()) level.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_BURP, SoundSource.PLAYERS, 1.0F, 0.6F);
                 }));

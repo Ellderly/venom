@@ -1,0 +1,23 @@
+{
+  "display": {
+    "icon": {
+      "id": "venom:chocolate_bar"
+    },
+    "title": {
+      "translate": "advancement.venom.chocolate"
+    },
+    "description": {
+      "translate": "advancement.venom.chocolate.desc"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": false,
+    "hidden": false
+  },
+  "criteria": {
+    "done": {
+      "trigger": "minecraft:impossible"
+    }
+  },
+  "parent": "venom:root"
+}
