@@ -86,7 +86,7 @@ public final class VenomModel {
             for (int j = 0; j < 3; j++) {
                 ModelPart w = wisps[i][j];
                 float ph = age * (0.09F + 0.012F * i) + i * 1.7F + j * 0.9F;
-                w.xRot = (j == 0 ? 0.75F : 0.25F) + 0.32F * Mth.sin(ph) + roar * 0.25F;
+                w.xRot = (j == 0 ? 0.3F : 0.16F) + 0.26F * Mth.sin(ph) + roar * 0.3F;
                 w.yRot = (j == 0 ? (i % 2 == 0 ? -0.35F : 0.35F) * (i == 4 ? 0 : 1) : 0.0F) + 0.34F * Mth.sin(ph * 0.83F + 1.3F);
             }
         }

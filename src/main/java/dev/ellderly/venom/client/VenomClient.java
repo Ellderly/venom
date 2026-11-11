@@ -53,6 +53,7 @@ public class VenomClient {
         NeoForge.EVENT_BUS.addListener((ClientPlayerNetworkEvent.Clone e) -> LocalMovement.reset());
 
         MovementHooks.localHandler = LocalMovement::travel;
+        if (System.getProperty("venom.autotest") != null) dev.ellderly.venom.client.dev.AutoTest.init();
     }
 
     private static void addLayers(EntityRenderersEvent.AddLayers event) {

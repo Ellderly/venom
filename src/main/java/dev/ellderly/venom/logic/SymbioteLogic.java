@@ -95,7 +95,7 @@ public final class SymbioteLogic {
     public static void setMove(ServerPlayer player, MoveState state) {
         player.setData(ModRegistry.MOVE, state);
         // gliding uses the small "elytra" hitbox, exactly like the owning client does
-        player.setForcedPose(state.gliding() ? Pose.FALL_FLYING : null);
+        player.setForcedPose(state.gliding() ? Pose.SPIN_ATTACK : null);
     }
 
     public static void sync(ServerPlayer player) {

@@ -1,4 +1,4 @@
-package dev.ellderly.venom.client.mixin;
+package dev.ellderly.venom.mixin.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import dev.ellderly.venom.client.render.PoseHooks;

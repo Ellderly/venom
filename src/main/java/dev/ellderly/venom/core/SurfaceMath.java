@@ -28,7 +28,7 @@ public final class SurfaceMath {
 
     /**
      * The direction "forward" means while clinging to a surface: the look vector laid onto the surface.
-     * Looking straight at a wall means "up the wall".
+     * Looking straight at a wall (or straight away from it) means "up the wall".
      */
     public static Vec3 heading(Vec3 look, Direction normal, float yaw) {
         Vec3 n = normal(normal);
@@ -38,7 +38,8 @@ public final class SurfaceMath {
             return h.normalize();
         }
         double dot = look.dot(n);
-        Vec3 f = look.subtract(n.scale(dot)).add(0, Math.max(0.0, -dot) * 1.4, 0);
+        // facing the wall - or hanging on it with your back to it - both mean "climb"
+        Vec3 f = look.subtract(n.scale(dot)).add(0, Math.abs(dot) * 1.4, 0);
         if (f.lengthSqr() < 1.0E-4) return new Vec3(0, 1, 0);
         return f.normalize();
     }

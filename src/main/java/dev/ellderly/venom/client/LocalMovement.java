@@ -63,7 +63,8 @@ public final class LocalMovement {
         boolean modeChanged = next.mode() != state.mode();
         state = next;
         if (modeChanged) stateTicks = 0;
-        p.setForcedPose(next.gliding() ? Pose.FALL_FLYING : null);
+        // small hitbox while gliding; SPIN_ATTACK has the elytra dimensions without vanilla's crawl visuals
+        p.setForcedPose(next.gliding() ? Pose.SPIN_ATTACK : null);
         PacketDistributor.sendToServer(new Net.MoveUpdate(next));
     }
 
@@ -190,7 +191,7 @@ public final class LocalMovement {
             if (factor > 0) {
                 Vec3 look = p.getLookAngle();
                 Vec3 dir = new Vec3(look.x, Math.max(look.y, 0.3), look.z).normalize();
-                double power = (0.85 + 1.55 * c) * factor;
+                double power = (0.8 + 1.15 * c) * factor;
                 Vec3 v = dir.scale(power);
                 v = new Vec3(v.x, Math.max(v.y, 0.5 + 0.45 * c), v.z);
                 p.setDeltaMovement(v);
@@ -210,8 +211,12 @@ public final class LocalMovement {
 
     // ------------------------------------------------------------------------------------------------ cling
 
+    private static Direction cornerFrom;
+    private static Vec3 cornerPos = Vec3.ZERO;
+
     private static void attach(LocalPlayer p, Direction normal) {
         clingVel = Vec3.ZERO;
+        cornerFrom = null;
         ballistic = false;
         p.setSprinting(false);
         setState(p, MoveState.cling(normal));
@@ -311,6 +316,13 @@ public final class LocalMovement {
             if (intended > 0.02 && moved.dot(dv) < intended * 0.3) {
                 Direction next = dir.getOpposite();
                 clingVel = Vec3.ZERO;
+                // pushing into a corner must not flip-flop between its two faces every tick
+                if (next == cornerFrom && p.position().distanceToSqr(cornerPos) < 0.5 * 0.5) {
+                    p.setDeltaMovement(Vec3.ZERO);
+                    return true;
+                }
+                cornerFrom = nd;
+                cornerPos = p.position();
                 if (next == Direction.UP) {
                     setState(p, MoveState.IDLE);  // reached the floor
                 } else {

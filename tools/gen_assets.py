@@ -40,15 +40,15 @@ def skin(pos, nrm, fu, fv, seed, fiber=0.55, flow=(1.0, 0.33, 1.0)):
     fine = vnoise(pos * np.array([3.0, 0.28, 3.0]) + warp[:, None] * 2, seed + 2) - 0.5
     blot = fbm(pos * 0.16, 3, seed + 3)
     bulge = np.sqrt((1 - (2 * fu - 1) ** 4) * (1 - (2 * fv - 1) ** 4))
-    col = np.array([16.0, 16.0, 22.0]) * (0.52 + 0.58 * bulge)[:, None]
-    col = col + veins[:, None] * np.array([17.0, 19.0, 28.0])
+    col = np.array([18.0, 18.0, 25.0]) * (0.52 + 0.58 * bulge)[:, None]
+    col = col + veins[:, None] * np.array([24.0, 27.0, 39.0])
     col = col + fine[:, None] * np.array([7.0, 7.5, 10.0])
     col = col + (blot[:, None] - 0.5) * np.array([7.0, 7.0, 10.0])
     # latex-like specular streak running down every side face + soft sheen on upward faces
     sidef = np.abs(nrm[:, 1]) < 0.5
     patch = 0.35 + 0.65 * smoothstep(0.35, 0.7, fbm(pos * 0.3, 2, seed + 8))
     band = np.exp(-(((fu - 0.30 + (warp - 0.5) * 0.3) / 0.085) ** 2)) * patch * sidef * smoothstep(0.0, 0.15, fv) * smoothstep(1.0, 0.85, fv)
-    col = col + band[:, None] * np.array([40.0, 45.0, 62.0])
+    col = col + band[:, None] * np.array([54.0, 60.0, 82.0])
     sheen = (nrm[:, 1] < -0.5) * bulge
     col = col + sheen[:, None] * np.array([15.0, 17.0, 24.0])
     g = fbm(pos * 0.5 + nrm * 2.3, 3, seed + 9)
@@ -303,16 +303,17 @@ def gen_suit(preview_dir=None):
     write_set(m, tx, 'suit', col, alpha, height, smooth, f0, emis, spread, eyes)
 
     # ---- black veins crawling under the host's skin (EMPOWERED form) ----
-    warp = fbm(pos * 0.17, 3, 71)
+    warp = fbm(pos * 0.15, 3, 71)
     d = np.linalg.norm((pos - np.array([0, 1.5, 0])) * np.array([1.0, 0.72, 1.0]), axis=1)
-    reach = smoothstep(22.0, 3.0, d)                       # densest around the neck / chest
-    q = pos * np.array([0.30, 0.20, 0.30]) + (warp[:, None] - 0.5) * 2.6
-    big = 1.0 - np.abs(2.0 * vnoise(q, 73) - 1.0)
-    thick = smoothstep(0.955 - 0.05 * reach, 0.985, big)
-    q2 = pos * np.array([0.85, 0.6, 0.85]) + (warp[:, None] - 0.5) * 5.0
-    small = 1.0 - np.abs(2.0 * vnoise(q2, 79) - 1.0)
-    cap = smoothstep(0.955, 0.99, small) * smoothstep(0.25, 0.8, reach)
-    a = np.clip(thick * (0.35 + 0.65 * reach) + cap * 0.75, 0, 1)
+    reach = smoothstep(23.0, 3.0, d)                       # densest around the neck / chest
+    q = pos * np.array([0.30, 0.20, 0.30]) + (warp[:, None] - 0.5) * 2.4
+    big = 1.0 - np.abs(2.0 * vnoise(q, 73) - 1.0)          # long continuous vessels
+    core = smoothstep(0.925, 0.985, big)
+    halo = smoothstep(0.78, 0.97, big) * 0.3               # bruise-like shadow under the skin around them
+    q2 = pos * np.array([0.6, 0.42, 0.6]) + (warp[:, None] - 0.5) * 3.0 + 17.0
+    small = 1.0 - np.abs(2.0 * vnoise(q2, 79) - 1.0)       # finer branches near the heart
+    branch = smoothstep(0.95, 0.99, small) * smoothstep(0.3, 0.75, reach)
+    a = np.clip((core + halo) * (0.3 + 0.7 * reach) + branch * 0.8, 0, 1)
     img = blank(m)
     vc = np.tile(np.array([16.0, 10.0, 24.0]), (N, 1))
     put(img, tx, np.concatenate([vc, (a * 235)[:, None]], 1))
@@ -579,7 +580,7 @@ def gen_gui():
     p = np.stack([x * 2.2, y * 2.2, np.zeros_like(x)], -1).reshape(-1, 3)
     edge = np.maximum(np.abs(x), np.abs(y)) ** 2.2 * 0.75 + (x * x + y * y) * 0.32
     tend = (ridged(p * 1.4, 3, 301).reshape(S, S) - 0.5) * 0.5 + (fbm(p, 3, 303).reshape(S, S) - 0.5) * 0.4
-    a = smoothstep(0.62, 1.0, edge + tend)
+    a = smoothstep(0.78, 1.25, edge + tend * 0.7)
     img = np.zeros((S, S, 4))
     img[..., :3] = (6, 6, 10)
     img[..., 3] = a * 255

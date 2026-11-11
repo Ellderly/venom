@@ -1,13 +1,13 @@
 {
   "required": true,
-  "package": "dev.ellderly.venom",
+  "package": "dev.ellderly.venom.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "mixin.PlayerTravelMixin"
+    "PlayerTravelMixin"
   ],
   "client": [
-    "client.mixin.HumanoidModelMixin",
-    "client.mixin.HumanoidArmorLayerMixin"
+    "client.HumanoidModelMixin",
+    "client.HumanoidArmorLayerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

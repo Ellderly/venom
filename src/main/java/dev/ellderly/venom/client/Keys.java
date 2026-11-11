@@ -16,9 +16,9 @@ public final class Keys {
     public static final KeyMapping FORM_DOWN = key("form_down", GLFW.GLFW_KEY_DOWN);
     public static final KeyMapping SWING = key("swing", GLFW.GLFW_KEY_R);
     public static final KeyMapping LASH = key("lash", GLFW.GLFW_KEY_V);
-    public static final KeyMapping CRAWL = key("crawl", GLFW.GLFW_KEY_C);
+    public static final KeyMapping CRAWL = key("crawl", GLFW.GLFW_KEY_H);
     public static final KeyMapping ROAR = key("roar", GLFW.GLFW_KEY_Z);
-    public static final KeyMapping DEVOUR = key("devour", GLFW.GLFW_KEY_X);
+    public static final KeyMapping DEVOUR = key("devour", GLFW.GLFW_KEY_B);
 
     private static KeyMapping key(String name, int code) {
         return new KeyMapping("key.venom." + name, KeyConflictContext.IN_GAME, InputConstants.Type.KEYSYM, code, CATEGORY);

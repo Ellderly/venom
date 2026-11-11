@@ -27,6 +27,13 @@ neoForge {
             client()
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
+        // headless smoke test: walks through forms / movement, writes screenshots to run/autotest/screenshots, quits
+        clientTest {
+            client()
+            gameDirectory = project.file('run/autotest')
+            systemProperty 'venom.autotest', providers.gradleProperty('venomTest').getOrElse('all')
+            programArguments.addAll '--width', '1280', '--height', '720'
+        }
         server {
             server()
             programArgument '--nogui'
@@ -69,4 +76,16 @@ neoForge.ideSyncTask generateModMetadata
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+}
+
+// client settings the unattended test run needs (skip onboarding screens, keep running without focus)
+tasks.register('prepareAutotestOptions', Copy) {
+    from 'tools/autotest'
+    into 'run/autotest'
+}
+tasks.matching { it.name == 'runClientTest' }.configureEach { dependsOn 'prepareAutotestOptions' }
+
+// the development-only auto test never ships
+tasks.named('jar', Jar) {
+    exclude 'dev/ellderly/venom/client/dev/**'
 }

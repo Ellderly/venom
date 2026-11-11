@@ -42,7 +42,7 @@ public final class Hud {
         float target = 0;
         if (mc.player != null) {
             SymbioteData d = mc.player.getData(ModRegistry.SYMBIOTE);
-            if (d.bonded) target = 0.5F * d.weight(SymbioteForm.VENOM, 0) + 0.25F * d.weight(SymbioteForm.SUIT, 0);
+            if (d.bonded) target = 0.34F * d.weight(SymbioteForm.VENOM, 0) + 0.16F * d.weight(SymbioteForm.SUIT, 0);
         }
         vignette += (target - vignette) * 0.1F;
     }
@@ -111,7 +111,13 @@ public final class Hud {
             g.blit(FORMS, x, y, 24, 24, d.prevForm.ordinal() * 32, 0, 32, 32, 128, 32);
             g.setColor(1, 1, 1, 1);
         }
-        g.drawString(font, form.displayName(), x + 28, y, d.weakened > 0 ? 0xFF7070 : 0xFFFFFF, true);
+        net.minecraft.network.chat.Component name = form.displayName();
+        float fit = Math.min(1.0F, 74.0F / Math.max(1, font.width(name)));
+        g.pose().pushPose();
+        g.pose().translate(x + 28, y + (1.0F - fit) * 4.0F, 0);
+        g.pose().scale(fit, fit, 1.0F);
+        g.drawString(font, name, 0, 0, d.weakened > 0 ? 0xFF7070 : 0xFFFFFF, true);
+        g.pose().popPose();
 
         // biomass bar
         int bx = x + 28, by = y + 11, bw = 74, bh = 5;

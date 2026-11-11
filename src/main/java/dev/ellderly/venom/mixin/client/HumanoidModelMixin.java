@@ -1,4 +1,4 @@
-package dev.ellderly.venom.client.mixin;
+package dev.ellderly.venom.mixin.client;
 
 import dev.ellderly.venom.client.render.PoseHooks;
 import net.minecraft.client.model.HumanoidModel;
