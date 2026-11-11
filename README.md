@@ -71,7 +71,9 @@ labPBR‑карты (`_n`, `_s`) — если в шейдере включена
 
 ## Сборка
 
-Нужна Java 21.
+**Готовый мод можно скачать без сборки:** [`releases/venom-1.0.0.jar`](releases/venom-1.0.0.jar) (на странице файла на GitHub — кнопка «Download raw file»).
+
+Чтобы собрать самому, нужна Java 21.
 
 ```bash
 ./gradlew build
