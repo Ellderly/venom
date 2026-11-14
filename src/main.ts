@@ -13,6 +13,7 @@ import { Destruction } from './voxels';
 import { Session, Msg, localSession, remoteSession } from './net';
 import { PRESETS, loadQualityName, saveQualityName } from './quality';
 
+declare const __BUILD__: string;
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const fmt = (s: number) => { s = Math.max(0, Math.ceil(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
@@ -266,7 +267,7 @@ async function boot() {
   buildings = new Buildings(map, Q); fx = new FX(Q.particles); destr = new Destruction(map, buildings.mat, fx, Q.voxel, Q.debris);
   scene.add(ground.group, buildings.group, destr.group, fx.group, marker, aimLine);
   resize(); buildSlots();
-  $('attr').textContent = map.meta.attribution;
+  $('attr').textContent = map.meta.attribution; $('ver').textContent = 'Сборка ' + __BUILD__;
   $('loading').classList.add('hidden'); $('menu').classList.remove('hidden');
   $('btnSolo').onclick = () => start(localSession());
   $('btnNet').onclick = () => { $('menuMain').classList.add('hidden'); $('menuNet').classList.remove('hidden'); if (location.protocol === 'http:' && !$<HTMLInputElement>('netAddr').value) $<HTMLInputElement>('netAddr').value = location.host; };

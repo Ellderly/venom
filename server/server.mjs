@@ -16,7 +16,7 @@ const server = http.createServer((req, res) => {
   if (!file.startsWith(DIST)) { res.writeHead(403).end(); return; }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404).end('Не найдено. Сначала выполните: npm run build'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' }).end(data);
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' }).end(data);
   });
 });
 
@@ -47,5 +47,10 @@ wss.on('connection', ws => {
   ws.on('close', () => broadcast({ type: 'players', players: wss.clients.size }));
 });
 
-server.on('error', e => console.error(e.code === 'EADDRINUSE' ? `Порт ${PORT} занят: сессия уже запущена на этом компьютере.` : e));
-server.listen(PORT, () => console.log(`VENOM: сессия запущена, порт ${PORT}. Откройте http://localhost:${PORT}`));
+// Если порт занят (например, осталась запущенной старая копия игры), берём следующий свободный.
+export const ready = new Promise(resolve => {
+  let port = PORT;
+  server.on('error', e => { if (e.code === 'EADDRINUSE' && port < PORT + 20) server.listen(++port); else console.error(e); });
+  server.on('listening', () => { console.log(`VENOM: сессия запущена, порт ${port}. Откройте http://localhost:${port}`); resolve(port); });
+  server.listen(port);
+});

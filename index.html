@@ -45,7 +45,7 @@ h2 { margin: 0 0 10px; font-size: 18px; }
 #step { font-size: 15px; } #step b { color: var(--acc); }
 #active { position: fixed; top: 60px; left: 10px; width: 230px; padding: 8px; z-index: 5; max-height: 50vh; overflow: auto; }
 #active .it { display: flex; justify-content: space-between; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-variant-numeric: tabular-nums; } #active .it:hover { background: rgba(255,255,255,.1); }
-#feed { position: fixed; left: 10px; bottom: 12px; width: 330px; z-index: 4; pointer-events: none; display: flex; flex-direction: column; gap: 4px; }
+#feed { position: fixed; left: 10px; bottom: 22px; width: 330px; z-index: 4; pointer-events: none; display: flex; flex-direction: column; gap: 4px; }
 #feed div { background: var(--bg); border-left: 3px solid var(--acc); padding: 5px 9px; border-radius: 4px; font-size: 13px; animation: fade 9s forwards; }
 @keyframes fade { 0%, 80% { opacity: 1 } 100% { opacity: 0 } }
 .lbl { position: fixed; z-index: 3; transform: translate(-50%, -130%); background: rgba(160,20,10,.85); border: 1px solid #ff8a70; color: #fff; padding: 1px 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; cursor: pointer; font-variant-numeric: tabular-nums; }
@@ -76,7 +76,7 @@ kbd { background: #222a31; border: 1px solid var(--line); border-radius: 4px; pa
   </div>
   <div id="menuNet" class="hidden">
     <h2>Сетевая игра</h2>
-    <p class="note">Хост запускает программу VENOM (или команду <kbd>npm run server</kbd>) — сессия создаётся автоматически на порту 8080. Хост подключается к <kbd>localhost:8080</kbd>, остальные вводят адрес хоста — в локальной сети или в общей VPN-сети (Radmin, Hamachi, ZeroTier).</p>
+    <p class="note">Хост запускает программу VENOM (или команду <kbd>npm run server</kbd>) — сессия создаётся автоматически на порту 8080. Хост подключается к адресу, который уже подставлен ниже, остальные вводят адрес хоста — в локальной сети или в общей VPN-сети (Radmin, Hamachi, ZeroTier).</p>
     <input type="text" id="netAddr" placeholder="адрес хоста, например 26.14.3.7:8080" style="width:100%">
     <div id="netErr" style="color:var(--acc); min-height:20px; margin:6px 0"></div>
     <button class="on" id="btnConnect">Подключиться</button> <button id="btnNetBack">Назад</button>
@@ -102,6 +102,7 @@ kbd { background: #222a31; border: 1px solid var(--line); border-radius: 4px; pa
   <div id="labels"></div>
 </div>
 <div id="attr"></div>
+<div id="ver" style="position:fixed;left:8px;bottom:4px;font-size:10px;color:rgba(255,255,255,.45);z-index:25"></div>
 <div id="modals"></div>
 <script type="module" src="/src/main.ts"></script>
 </body>
