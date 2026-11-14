@@ -3,6 +3,8 @@ on:
   push:
     branches: [main, 'claude/**']
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   windows:
     runs-on: windows-latest
@@ -20,3 +22,11 @@ jobs:
         with:
           name: VENOM-windows
           path: release/*.exe
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.${{ github.run_number }}
+          name: VENOM 0.1.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          body: Скачайте VENOM.exe и запустите. Установка не нужна.
+          files: release/VENOM.exe
+          make_latest: true

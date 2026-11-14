@@ -36,7 +36,8 @@
       "package.json"
     ],
     "win": {
-      "target": "portable"
+      "target": "portable",
+      "artifactName": "VENOM.exe"
     },
     "electronVersion": "33.2.0"
   }
