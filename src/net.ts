@@ -2,7 +2,7 @@
 import { Launch } from './sim';
 
 export type Msg =
-  | { type: 'welcome'; you: string; now: number; players: number; launches: Launch[]; env: { hour: number; speed: number } }
+  | { type: 'welcome'; you: string; now: number; players: number; launches: Launch[]; env?: { hour: number; speed: number } }
   | { type: 'players'; players: number }
   | { type: 'launch'; launch: Launch }
   | { type: 'env'; hour: number; speed: number }
@@ -17,10 +17,21 @@ export interface Session {
   close(): void;
 }
 
+const SOLO_SAVE = 'venom.save.solo';
+
+/** Одиночная игра: всё локально, попадания сохраняются в хранилище браузера/программы. */
 export function localSession(): Session {
   let handler: (m: Msg) => void = () => {};
-  const s: Session = { online: false, me: 'я', now: () => performance.now() / 1000, close: () => {}, listen: h => { handler = h; },
-    send(m) { if (m.type === 'launch') m.launch.t0 = s.now(); queueMicrotask(() => handler(m)); } };
+  let log: Launch[] = [];
+  try { log = JSON.parse(localStorage.getItem(SOLO_SAVE) || '[]'); } catch { log = []; }
+  const persist = () => { try { localStorage.setItem(SOLO_SAVE, JSON.stringify(log)); } catch { /* хранилище недоступно */ } };
+  const s: Session = { online: false, me: 'я', now: () => performance.now() / 1000, close: () => {},
+    listen: h => { handler = h; h({ type: 'welcome', you: 'я', now: s.now(), players: 1, launches: log.map(L => ({ ...L, t0: -1e7 })) }); },
+    send(m) {
+      if (m.type === 'launch') { m.launch.t0 = s.now(); log.push({ ...m.launch }); persist(); }
+      if (m.type === 'reset') { log = []; persist(); }
+      queueMicrotask(() => handler(m));
+    } };
   return s;
 }
 

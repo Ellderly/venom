@@ -69,15 +69,15 @@ kbd { background: #222a31; border: 1px solid var(--line); border-radius: 4px; pa
 <div id="menu" class="hidden"><div class="box">
   <h1>VENOM</h1><p>Оборона Киева</p>
   <div id="menuMain">
-    <button class="big" id="btnSolo">Одиночная игра<small>Песочница: запуск целей и разрушения</small></button>
+    <button class="big" id="btnSolo">Одиночная игра<small>Песочница. Мир сохраняется автоматически</small></button>
     <button class="big" id="btnNet">Сетевая игра<small>Общая сессия с друзьями</small></button>
     <button class="big" id="btnSettings0">Настройки<small>Графика и звук</small></button>
     <button class="big" id="btnHelp0">Управление<small>Камера и горячие клавиши</small></button>
   </div>
   <div id="menuNet" class="hidden">
     <h2>Сетевая игра</h2>
-    <p class="note">Хост запускает программу VENOM (или команду <kbd>npm run server</kbd>) — сессия создаётся автоматически на порту 8080. Хост подключается к адресу, который уже подставлен ниже, остальные вводят адрес хоста — в локальной сети или в общей VPN-сети (Radmin, Hamachi, ZeroTier).</p>
-    <input type="text" id="netAddr" placeholder="адрес хоста, например 26.14.3.7:8080" style="width:100%">
+    <p class="note"><b>Вы хост:</b> просто нажмите «Подключиться» — адрес уже подставлен.<br><b>Вы в гостях:</b> введите адрес хоста с портом, например <kbd>26.14.3.7:8080</kbd>. Нужна общая сеть: домашняя или VPN (Radmin, Hamachi, ZeroTier).<br>Мир сохраняется у хоста автоматически.</p>
+    <input type="text" id="netAddr" placeholder="адрес хоста" style="width:100%">
     <div id="netErr" style="color:var(--acc); min-height:20px; margin:6px 0"></div>
     <button class="on" id="btnConnect">Подключиться</button> <button id="btnNetBack">Назад</button>
   </div>

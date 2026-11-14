@@ -89,6 +89,7 @@ function feed(t: string) { const d = document.createElement('div'); d.textConten
 function addDrone(L: Launch) {
   if (!UNITS[L.unit] || ![L.sx, L.sz, L.tx, L.tz, L.t0].every(Number.isFinite)) return; // чужие данные по сети не должны ломать игру
   if (!session!.online) L.id = localId++;
+  L = { ...L };
   if (L.impactT === undefined) planLaunch(L, map);
   const u = UNITS[L.unit];
   if (session!.now() >= L.t0 + L.impactT) { impact(L, true); return; } // подключились позже — попадание уже было
@@ -118,7 +119,7 @@ function removeDrone(d: Drone) { scene.remove(d.mesh); d.label.remove(); d.row.r
 function resetDamage() { map.bDamage.fill(0); destr.reset(); buildings.reset(); fx.clear(); for (const d of [...drones.values()]) removeDrone(d); }
 
 function onMsg(m: Msg) {
-  if (m.type === 'welcome') { env.hour = m.env.hour; env.speed = m.env.speed; m.launches.forEach(addDrone); setPlayers(m.players); }
+  if (m.type === 'welcome') { if (m.env) { env.hour = m.env.hour; env.speed = m.env.speed; } m.launches.forEach(addDrone); setPlayers(m.players); if (m.launches.length) feed(`Мир загружен: попаданий ${m.launches.length}`); }
   else if (m.type === 'launch') addDrone(m.launch);
   else if (m.type === 'env') { env.hour = m.hour; env.speed = m.speed; }
   else if (m.type === 'reset') { resetDamage(); feed('Разрушения сброшены'); }
@@ -130,7 +131,7 @@ function start(s: Session) {
   session = s; setPlayers(1); s.listen(onMsg);
   $('menu').classList.add('hidden'); $('hud').classList.remove('hidden'); sound.unlock();
 }
-function toMenu() { session?.close(); session = null; arm(null); resetDamage(); $('hud').classList.add('hidden'); $('menu').classList.remove('hidden'); $('menuMain').classList.remove('hidden'); $('menuNet').classList.add('hidden'); }
+function toMenu() { session?.close(); session = null; arm(null); resetDamage(); localId = 1; $('hud').classList.add('hidden'); $('menu').classList.remove('hidden'); $('menuMain').classList.remove('hidden'); $('menuNet').classList.add('hidden'); }
 
 // ---------- окна ----------
 function modal(html: string, cls = '') {
@@ -182,7 +183,7 @@ function showAdmin() {
     <label>Время суток <input type="range" id="ah" min="0" max="24" step="0.05" value="${env.hour}"> <b id="ahv">${env.clock()}</b></label>
     <label>Скорость времени <select id="as">${speeds.map(s => `<option value="${s}" ${s === env.speed ? 'selected' : ''}>${s === 0 ? 'пауза' : '×' + s}</option>`).join('')}</select></label>
     <p class="note">×1 — как в жизни, ×60 — час за минуту, ×3600 — сутки за 24 секунды. В сетевой игре меняется у всех.</p>
-    <button id="ar">Сбросить разрушения</button> <button data-close>Закрыть</button></div>`);
+    <button id="ar">Сбросить разрушения (новый мир)</button> <button data-close>Закрыть</button></div>`);
   const push = () => session?.send({ type: 'env', hour: env.hour, speed: env.speed });
   (m.querySelector('#ah') as HTMLInputElement).oninput = e => { env.hour = Number((e.target as HTMLInputElement).value) % 24; m.querySelector('#ahv')!.textContent = env.clock(); };
   (m.querySelector('#ah') as HTMLInputElement).onchange = push;
