@@ -30,6 +30,7 @@ const NUM = ['sx', 'sz', 'tx', 'tz', 'seed', 'cruiseY', 'dur', 'impactT', 'ix', 
 const validLaunch = L => L && typeof L.unit === 'string' && L.unit.length < 32 && NUM.every(k => Number.isFinite(L[k]));
 
 const wss = new WebSocketServer({ server });
+wss.on('error', () => {}); // ошибки порта обрабатываются ниже, на самом сервере
 const broadcast = m => { const s = JSON.stringify(m); for (const c of wss.clients) if (c.readyState === 1) c.send(s); };
 
 wss.on('connection', ws => {
