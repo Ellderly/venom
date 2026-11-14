@@ -15,7 +15,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm install --no-save electron@33.2.0 electron-builder@25.1.8
-      - run: npx electron-builder --win portable --publish never -c.electronVersion=33.2.0
+      - run: npx electron-builder --win portable --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: VENOM-windows

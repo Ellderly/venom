@@ -37,6 +37,7 @@
     ],
     "win": {
       "target": "portable"
-    }
+    },
+    "electronVersion": "33.2.0"
   }
 }
