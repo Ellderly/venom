@@ -5,10 +5,11 @@ import { Ground } from './ground';
 import { Buildings } from './buildings';
 import { CityCamera } from './camera';
 import { FX } from './fx';
-import { Sound } from './audio';
+import { Sound, Heard } from './audio';
 import { buildGeran2 } from './model';
 import { UNITS, UnitDef } from './units';
-import { Launch, State, trajectory, planLaunch, applyImpact } from './sim';
+import { Launch, State, trajectory, planLaunch } from './sim';
+import { Destruction } from './voxels';
 import { Session, Msg, localSession, remoteSession } from './net';
 import { PRESETS, loadQualityName, saveQualityName } from './quality';
 
@@ -21,7 +22,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: qName !== 'low', p
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace; // свои шейдеры сами переводят цвет в sRGB
 const scene = new THREE.Scene();
 const map = new MapData(), sound = new Sound();
-let env: Env, ground: Ground, buildings: Buildings, cc: CityCamera, fx: FX;
+let env: Env, ground: Ground, buildings: Buildings, cc: CityCamera, fx: FX, destr: Destruction;
 let session: Session | null = null;
 let dyn = 1; // динамическое разрешение
 
@@ -102,18 +103,18 @@ function addDrone(L: Launch) {
 }
 
 function impact(L: Launch, silent = false) {
-  const u = UNITS[L.unit], r = applyImpact(L, map);
-  for (const b of [...r.destroyed, ...r.damaged]) buildings.damaged(b);
+  const u = UNITS[L.unit];
+  const [hit, fell] = destr.blast(L.ix, L.iy, L.iz, 1.6 * Math.cbrt(u.tntKg), b => buildings.hide(b));
   if (silent) { fx.smolder(L.ix, L.iy, L.iz, u.tntKg); return; }
   fx.explode(L.ix, L.iy, L.iz, u.tntKg);
   const dist = cc.cam.position.distanceTo(new THREE.Vector3(L.ix, L.iy, L.iz));
-  sound.explosion(dist, u.tntKg); cc.shake = Math.max(cc.shake, Math.min(6, 900 / Math.max(60, dist)));
-  feed(L.building >= 0 ? `Попадание: ${u.name} — здание ${map.bDamage[L.building] > 0.6 ? 'разрушено' : 'повреждено'}` + (r.damaged.length ? `, задето соседних: ${r.damaged.length}` : '') : `Попадание: ${u.name} — открытая местность`);
+  sound.explosion(dist, u.tntKg, fell > 40); cc.shake = Math.max(cc.shake, Math.min(6, 900 / Math.max(60, dist)));
+  feed(hit ? `Попадание: ${u.name} — повреждено зданий: ${hit}` + (fell > 40 ? ', часть конструкций обрушилась' : '') : `Попадание: ${u.name} — открытая местность`);
 }
 
 function removeDrone(d: Drone) { scene.remove(d.mesh); d.label.remove(); d.row.remove(); drones.delete(d.L.id); if (!drones.size) $('active').classList.add('hidden'); }
 
-function resetDamage() { map.bDamage.fill(0); buildings.reset(); fx.clear(); for (const d of [...drones.values()]) removeDrone(d); }
+function resetDamage() { map.bDamage.fill(0); destr.reset(); buildings.reset(); fx.clear(); for (const d of [...drones.values()]) removeDrone(d); }
 
 function onMsg(m: Msg) {
   if (m.type === 'welcome') { env.hour = m.env.hour; env.speed = m.env.speed; m.launches.forEach(addDrone); setPlayers(m.players); }
@@ -208,7 +209,7 @@ window.addEventListener('keydown', e => {
 });
 
 // ---------- главный цикл ----------
-const v3 = new THREE.Vector3(), fwd = new THREE.Vector3();
+const v3 = new THREE.Vector3(), fwd = new THREE.Vector3(), heard: Heard[] = [];
 let last = performance.now(), fpsAcc = 0, fpsN = 0, fpsT = 0;
 function frame(nowMs: number) {
   requestAnimationFrame(frame);
@@ -219,7 +220,7 @@ function frame(nowMs: number) {
   U.uFogD.value = 1 / Math.max(45000, t.dist * 3.2);
   ground.update(t.x, t.z, t.dist); buildings.update(t.x, t.z, t.dist);
   if (session) {
-    const now = session.now(); let near = -1, closing = 0;
+    const now = session.now(); heard.length = 0;
     for (const d of [...drones.values()]) {
       const tt = now - d.L.t0;
       if (tt >= d.L.impactT) { removeDrone(d); impact(d.L); continue; }
@@ -228,8 +229,9 @@ function frame(nowMs: number) {
       d.mesh.lookAt(v3.copy(d.mesh.position).add(fwd)); d.prop.rotation.z += dt * 90;
       const dist = cc.cam.position.distanceTo(d.mesh.position);
       d.mesh.scale.setScalar(Math.max(1, dist / 260)); // издалека модель увеличивается, чтобы цель оставалась видимой
-      if (near < 0 || dist < near) { near = dist; closing = -fwd.dot(v3.copy(d.mesh.position).sub(cc.cam.position).normalize()); }
+      const closing = -fwd.dot(v3.copy(d.mesh.position).sub(cc.cam.position).normalize());
       v3.copy(d.mesh.position).project(cc.cam);
+      heard.push({ dist, closing, pan: v3.z > 1 ? -v3.x : v3.x, dive: Math.min(1, Math.max(0, 1 - (d.L.impactT - tt) / 3.5)), seed: d.L.seed });
       // метка всегда на экране: если цель вне кадра, прижимается к краю
       if (v3.z > 1) { v3.x = -v3.x; v3.y = -v3.y; }
       const off = v3.z > 1 || Math.abs(v3.x) > 0.94 || v3.y > 0.8 || v3.y < -0.94;
@@ -237,16 +239,16 @@ function frame(nowMs: number) {
       d.label.style.left = `${(v3.x + 1) / 2 * innerWidth}px`; d.label.style.top = `${(1 - v3.y) / 2 * innerHeight}px`; d.label.style.opacity = off ? '0.7' : '1';
       const eta = fmt(d.L.impactT - tt); d.label.textContent = `${UNITS[d.L.unit].name} ${eta}`; d.row.innerHTML = `<span>${UNITS[d.L.unit].name} №${d.L.id}</span><b>${eta}</b>`;
     }
-    sound.engine(near, closing);
-  }
+  } else heard.length = 0;
+  sound.engines(heard);
   if (marker.visible) marker.scale.setScalar(Math.max(12, t.dist * 0.018) * (1 + 0.08 * Math.sin(nowMs / 150)));
-  fx.update(dt);
+  destr.update(dt); fx.update(dt);
   renderer.render(scene, cc.cam);
   if (cardView) { cardView.m.rotation.y += dt * 0.6; cardView.m.rotation.z = 0.25 * Math.sin(nowMs / 1700); cardView.r.render(cardView.s, cardView.c); }
   fpsAcc += dt; fpsN++; fpsT += dt;
   if (fpsT > 0.5) {
     const fps = fpsN / fpsAcc, i = renderer.info.render;
-    $('perf').textContent = `${fps.toFixed(0)} к/с · ${(1000 / fps).toFixed(1)} мс · вызовов ${i.calls} · треуг. ${(i.triangles / 1e6).toFixed(2)} млн\nтайлов ${buildings.stats.tiles} · частиц ${fx.count} · разрешение ${Math.round(dyn * 100)}% · ${Q.name}`;
+    $('perf').textContent = `${fps.toFixed(0)} к/с · ${(1000 / fps).toFixed(1)} мс · вызовов ${i.calls} · треуг. ${(i.triangles / 1e6).toFixed(2)} млн\nтайлов ${buildings.stats.tiles} · частиц ${fx.count} · обломков ${destr.debris} · разрешение ${Math.round(dyn * 100)}% · ${Q.name}`;
     $('clock').textContent = env.clock(); $('tspeed').textContent = env.speed ? `×${env.speed}` : 'пауза';
     const nd = fps < 40 ? Math.max(0.5, dyn - 0.1) : fps > 57 ? Math.min(1, dyn + 0.05) : dyn;
     if (nd !== dyn && document.hasFocus() && !location.search.includes('nodyn')) { dyn = nd; resize(); }
@@ -261,8 +263,8 @@ async function boot() {
   ground = new Ground(map, Q, renderer.capabilities.getMaxAnisotropy());
   bar(0.75, 'Отрисовка карты');
   await ground.buildOverview(p => bar(0.75 + p * 0.23, 'Отрисовка карты'));
-  buildings = new Buildings(map, Q); fx = new FX(Q.particles);
-  scene.add(ground.group, buildings.group, fx.group, marker, aimLine);
+  buildings = new Buildings(map, Q); fx = new FX(Q.particles); destr = new Destruction(map, buildings.mat, fx, Q.voxel, Q.debris);
+  scene.add(ground.group, buildings.group, destr.group, fx.group, marker, aimLine);
   resize(); buildSlots();
   $('attr').textContent = map.meta.attribution;
   $('loading').classList.add('hidden'); $('menu').classList.remove('hidden');
@@ -276,7 +278,7 @@ async function boot() {
   };
   $('btnSettings0').onclick = $('btnSettings').onclick = showSettings; $('btnHelp0').onclick = $('btnHelp').onclick = showHelp;
   $('btnAdmin').onclick = showAdmin; $('btnMenu').onclick = toMenu; $('btnCancel').onclick = () => arm(null);
-  (window as any).venom = { map, cc, env, drones, buildings, fx, arm, UNITS, get session() { return session; } };
+  (window as any).venom = { map, cc, env, drones, buildings, fx, destr, arm, UNITS, get session() { return session; } };
   requestAnimationFrame(frame);
 }
 boot().catch(e => { $('loadText').textContent = 'Ошибка загрузки: ' + (e?.message ?? e); console.error(e); });

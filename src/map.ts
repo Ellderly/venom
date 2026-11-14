@@ -12,7 +12,9 @@ export class MapData {
   hNx = 0; hNz = 0; hgt!: Uint16Array;
   tilesX = 0; tilesZ = 0;
   tileB: number[][] = []; tileA: number[][] = []; tileL: number[][] = [];
-  bDamage!: Float32Array; // 0 — цело, 1 — руины
+  bDamage!: Float32Array; // доля разрушенного объёма; > 0 — здание переведено в воксели
+  /** Занятость точки в разрушаемом здании; null — здание ещё целое. Назначается модулем разрушений. */
+  solid: ((b: number, x: number, y: number, z: number) => boolean | null) | null = null;
   private hashNx = 0; private hashNz = 0; private hash: (number[] | undefined)[] = [];
 
   async load(base: string, progress: (p: number, label: string) => void) {
@@ -92,7 +94,6 @@ export class MapData {
     return sampleHeight(this.hgt, this.hNx, this.hNz, this.meta.x0, this.meta.z0, this.meta.cell, x, z);
   }
 
-  bHeight(b: number) { return this.bH[b] / 10 * (1 - 0.85 * this.bDamage[b]); }
 
   bCenter(b: number): [number, number] {
     let x = 0, z = 0; const a = this.bStart[b], e = this.bStart[b + 1];

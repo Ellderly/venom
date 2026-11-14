@@ -24,12 +24,12 @@ class Layer {
     this.aPos.setUsage(THREE.DynamicDrawUsage); this.aCol.setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute('iPos', this.aPos); geo.setAttribute('iCol', this.aCol);
     this.mesh = new THREE.Mesh(geo, new THREE.ShaderMaterial({
-      uniforms: { map: { value: tex }, uAmb: U.uAmb, uSunCol: U.uSunCol, uLit: { value: additive ? 0 : 1 } },
+      uniforms: { map: { value: tex }, uAmb: U.uAmb, uSunCol: U.uSunCol, uLit: { value: additive ? 0 : 1 }, uA: { value: additive ? 1 : 0.6 } },
       transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
       vertexShader: `attribute vec4 iPos; attribute vec4 iCol; varying vec2 vUv; varying vec4 vC;
         void main(){ vUv = position.xy*0.5+0.5; vC = iCol; vec4 mv = viewMatrix * vec4(iPos.xyz,1.0); mv.xy += position.xy * iPos.w; gl_Position = projectionMatrix * mv; }`,
-      fragmentShader: `uniform sampler2D map; uniform vec3 uAmb, uSunCol; uniform float uLit; varying vec2 vUv; varying vec4 vC;
-        void main(){ float a = texture2D(map, vUv).a * vC.a; vec3 c = vC.rgb * mix(vec3(1.0), uAmb*1.3 + uSunCol*0.45, uLit); gl_FragColor = vec4(sqrt(c), a); }`,
+      fragmentShader: `uniform sampler2D map; uniform vec3 uAmb, uSunCol; uniform float uLit, uA; varying vec2 vUv; varying vec4 vC;
+        void main(){ float a = texture2D(map, vUv).a * vC.a * uA; vec3 c = vC.rgb * mix(vec3(1.0), uAmb*1.3 + uSunCol*0.45, uLit); gl_FragColor = vec4(sqrt(c), a); }`,
     }));
     this.mesh.frustumCulled = false; this.mesh.renderOrder = additive ? 21 : 20;
   }
@@ -82,13 +82,16 @@ export class FX {
     this.fire.add(x, y + s, z, 0, 0, 0, 0.14, s * 14, s * 60, 1.6, 1.4, 1.0);                       // вспышка
     for (let i = 0; i < 26; i++) { const v = s * 5 * (0.4 + R()); this.fire.add(x + rnd() * s, y + R() * s, z + rnd() * s, rnd() * v, R() * v * 1.3 + s * 2, rnd() * v, 0.5 + R() * 0.7, s * 1.6, s * 2.2, 1.0, 0.42 + R() * 0.25, 0.08, 2.2); } // огненный шар
     for (let i = 0; i < 46; i++) { const v = s * 16 * (0.3 + R()); this.fire.add(x, y + 1, z, rnd() * v, R() * v * 1.2, rnd() * v, 0.7 + R() * 1.4, 0.35 + R() * 0.3, -0.15, 1.0, 0.6, 0.2, 0.5, 14); }         // искры
-    for (let i = 0; i < 34; i++) { const v = s * 3.5 * (0.3 + R()); const g = 0.06 + R() * 0.07; this.smoke.add(x + rnd() * s * 1.5, y + R() * s * 2, z + rnd() * s * 1.5, rnd() * v, R() * v * 1.6 + s * 1.5, rnd() * v, 5 + R() * 9, s * 2.2, s * 1.1, g, g, g, 0.9, -0.5); } // клуб дыма
-    for (let i = 0; i < 28; i++) { const a = i / 28 * 6.283, v = s * 9 * (0.7 + R() * 0.5); const g = 0.42 + R() * 0.1; this.smoke.add(x, y + 0.8, z, Math.cos(a) * v, R() * 1.5, Math.sin(a) * v, 3 + R() * 3, s * 1.5, s * 1.6, g, g * 0.94, g * 0.84, 1.6); } // пыль по земле
+    for (let i = 0; i < 34; i++) { const v = s * 3.5 * (0.3 + R()); const g = 0.06 + R() * 0.07; this.smoke.add(x + rnd() * s * 1.5, y + R() * s * 2, z + rnd() * s * 1.5, rnd() * v, R() * v * 1.6 + s * 1.5, rnd() * v, 4 + R() * 6, s * 1.6, s * 0.5, g, g, g, 0.9, -0.5); } // клуб дыма
+    for (let i = 0; i < 28; i++) { const a = i / 28 * 6.283, v = s * 9 * (0.7 + R() * 0.5); const g = 0.42 + R() * 0.1; this.smoke.add(x, y + 0.8, z, Math.cos(a) * v, R() * 1.5, Math.sin(a) * v, 2.5 + R() * 2.5, s * 1.2, s * 0.9, g, g * 0.94, g * 0.84, 1.6); } // пыль по земле
     for (let i = 0; i < 30; i++) { const v = s * 9 * (0.3 + R()); this.smoke.add(x, y + 1, z, rnd() * v, R() * v * 1.4 + 4, rnd() * v, 1.6 + R() * 2, 0.5 + R() * 0.7, 0, 0.05, 0.045, 0.04, 0.2, 18); }      // обломки
-    const ring = new THREE.Mesh(this.ringGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide, fog: false }));
-    ring.position.set(x, y + 1.5, z); this.group.add(ring); this.rings.push({ mesh: ring, t: 0, r: s * 28 });
+    const ring = new THREE.Mesh(this.ringGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+    ring.position.set(x, y + 1.5, z); this.group.add(ring); this.rings.push({ mesh: ring, t: 0, r: s * 16 });
     this.emitters.push({ x, y, z, t: 0, dur: 90 + R() * 60, s, acc: 0 });
   }
+
+  /** Облако пыли от падающих обломков. */
+  dust(x: number, y: number, z: number, size: number) { const g = 0.4 + Math.random() * 0.12; this.smoke.add(x, y + size * 0.3, z, (Math.random() - 0.5) * 4, 1 + Math.random() * 2, (Math.random() - 0.5) * 4, 3 + Math.random() * 3, size, size * 0.8, g, g * 0.95, g * 0.86, 1.2); }
 
   /** Дым без взрыва — для уже повреждённых зданий при подключении к сессии. */
   smolder(x: number, y: number, z: number, tnt: number) { this.emitters.push({ x, y, z, t: 25, dur: 80, s: Math.cbrt(tnt), acc: 0 }); }
@@ -101,14 +104,14 @@ export class FX {
       e.acc += dt * (3 + 7 * k);
       while (e.acc > 1) {
         e.acc -= 1; const g = 0.05 + R() * 0.06 + (1 - burn) * 0.12;
-        this.smoke.add(e.x + (R() - 0.5) * e.s * 2, e.y + R() * 2, e.z + (R() - 0.5) * e.s * 2, (R() - 0.5) * 1.5, 5 + R() * 4, (R() - 0.5) * 1.5, 9 + R() * 9, e.s * 1.3, e.s * 0.75, g, g, g, 0.12, 0);
+        this.smoke.add(e.x + (R() - 0.5) * e.s * 2, e.y + R() * 2, e.z + (R() - 0.5) * e.s * 2, (R() - 0.5) * 1.5, 5 + R() * 4, (R() - 0.5) * 1.5, 8 + R() * 8, e.s * 0.9, e.s * 0.32, g, g, g, 0.12, 0);
         if (R() < burn) this.fire.add(e.x + (R() - 0.5) * e.s * 2.4, e.y + R() * 1.5, e.z + (R() - 0.5) * e.s * 2.4, (R() - 0.5), 3 + R() * 4, (R() - 0.5), 0.5 + R() * 0.6, e.s * (0.6 + R() * 0.6), -e.s * 0.5, 1.0, 0.45 + R() * 0.2, 0.08, 0.4);
       }
     }
     for (let i = this.rings.length - 1; i >= 0; i--) {
-      const r = this.rings[i]; r.t += dt; const k = r.t / 0.9;
+      const r = this.rings[i]; r.t += dt; const k = r.t / 0.45;
       if (k >= 1) { this.group.remove(r.mesh); (r.mesh.material as THREE.Material).dispose(); this.rings.splice(i, 1); continue; }
-      r.mesh.scale.setScalar(r.r * (1 - (1 - k) ** 3)); (r.mesh.material as THREE.MeshBasicMaterial).opacity = 0.45 * (1 - k);
+      r.mesh.scale.setScalar(r.r * (1 - (1 - k) ** 3)); (r.mesh.material as THREE.MeshBasicMaterial).opacity = 0.22 * (1 - k);
     }
     this.fire.update(dt, 0.6); this.smoke.update(dt, 2.2);
   }

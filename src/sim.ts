@@ -43,32 +43,9 @@ export function planLaunch(L: Launch, map: MapData) {
   for (let t = tDive; t < L.dur + 5; t += 0.02) {
     trajectory(L, map, t, s);
     const g = map.heightAt(s.x, s.z), b = map.buildingAt(s.x, s.z);
-    const hitB = b >= 0 && s.y <= g + map.bHeight(b);
+    const hitB = b >= 0 && (map.solid?.(b, s.x, s.y, s.z) ?? s.y <= g + map.bH[b] / 10);
     if (hitB || s.y <= g + 0.3) { L.impactT = t; L.ix = s.x; L.iy = Math.max(s.y, g); L.iz = s.z; L.building = hitB ? b : -1; return; }
   }
   trajectory(L, map, L.dur, s); L.impactT = L.dur; L.ix = s.x; L.iy = map.heightAt(s.x, s.z); L.iz = s.z; L.building = -1;
 }
 
-export interface Impact { launch: Launch; destroyed: number[]; damaged: number[] }
-
-/** Применяет урон от взрыва к зданиям. Возвращает затронутые здания. */
-export function applyImpact(L: Launch, map: MapData): Impact {
-  const tnt = UNITS[L.unit].tntKg, r = 4.5 * Math.cbrt(tnt); // радиус тяжёлых повреждений, м
-  const destroyed: number[] = [], damaged: number[] = [];
-  const hit = (b: number, d: number) => {
-    const before = map.bDamage[b]; map.bDamage[b] = Math.min(1, before + d);
-    (map.bDamage[b] > 0.3 ? destroyed : damaged).push(b);
-  };
-  if (L.building >= 0) {
-    const b = L.building, n = map.bStart[b + 1] - map.bStart[b];
-    let area = 0; for (let i = 0; i < n; i++) { const p = map.bStart[b] + i, q = map.bStart[b] + (i + 1) % n; area += map.bPts[p * 2] * map.bPts[q * 2 + 1] - map.bPts[q * 2] * map.bPts[p * 2 + 1]; }
-    const vol = Math.abs(area / 2) * map.bH[b] / 10;
-    // маленький дом складывается целиком, большой теряет верхние этажи и выгорает
-    hit(b, Math.min(1, Math.max(0.34, tnt * 60 / vol)));
-  }
-  for (const b of map.buildingsNear(L.ix, L.iz, r * 2.2)) if (b !== L.building) {
-    const [cx, cz] = map.bCenter(b), d = Math.hypot(cx - L.ix, cz - L.iz);
-    hit(b, d < r ? 0.25 : 0.1);
-  }
-  return { launch: L, destroyed, damaged };
-}

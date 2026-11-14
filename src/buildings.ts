@@ -11,7 +11,7 @@ export class Buildings {
   tiles = new Map<number, TileMesh>();
   private pending = new Set<number>();
   private workers: Worker[] = []; private busy: number[] = [];
-  private mat: THREE.ShaderMaterial;
+  mat: THREE.ShaderMaterial;
   stats = { tiles: 0, tris: 0 };
 
   constructor(private map: MapData, public q: Quality) {
@@ -31,8 +31,8 @@ export class Buildings {
         void main(){
           vec3 n = normalize(vN); vec3 alb = vC.rgb * vC.rgb; vec3 emis = vec3(0.0);
           float dist = distance(cameraPosition, vW);
-          float burnt = step(vC.a, 0.002);             // альфа 0 — выгоревшее здание
-          if (vC.a < 0.999 && burnt < 0.5) {            // стена: процедурные окна
+          float raw = step(vC.a, 0.002);               // альфа 0 — излом или копоть: цвет как есть, без окон
+          if (vC.a < 0.999 && raw < 0.5) {            // стена: процедурные окна
             float seed = vC.a * 255.0;
             vec2 cell = vec2(vUv.x / 3.3, vUv.y / 3.0); vec2 f = fract(cell); vec2 id = floor(cell);
             float win = step(0.3, f.x) * step(f.x, 0.72) * step(0.34, f.y) * step(f.y, 0.78) * step(0.0, vUv.y);
@@ -44,7 +44,6 @@ export class Buildings {
             emis += vec3(1.0, 0.75, 0.4) * (1.0 - fade) * uNight * 0.1 * step(0.0, vUv.y);  // вдали — общее свечение фасада
             alb *= 0.9 + 0.1 * smoothstep(0.0, 4.0, vUv.y);
           }
-          alb = mix(alb, vec3(0.012), burnt);
           float d = max(dot(n, uSun), 0.0);
           vec3 c = alb * (uAmb * (0.75 + 0.25 * n.y) + uSunCol * d) + emis;
           gl_FragColor = vec4(sqrt(applyFog(c, dist)), 1.0);
@@ -64,7 +63,7 @@ export class Buildings {
     const mesh = new THREE.Mesh(geo, this.mat);
     const tm: TileMesh = { mesh, idxCount: d.idx.length, bigIdx: d.bigIdx, vStart: d.vStart, base: d.base, sorted: d.sorted };
     this.tiles.set(d.tile, tm); this.group.add(mesh);
-    for (let k = 0; k < tm.sorted.length; k++) if (this.map.bDamage[tm.sorted[k]] > 0) this.applyDamage(tm, k);
+    for (let k = 0; k < tm.sorted.length; k++) if (this.map.bDamage[tm.sorted[k]] > 0) this.hideAt(tm, k);
   }
 
   update(cx: number, cz: number, camDist: number) {
@@ -94,25 +93,17 @@ export class Buildings {
     this.stats.tiles = this.tiles.size; this.stats.tris = tris;
   }
 
-  private applyDamage(tm: TileMesh, k: number) {
-    const b = tm.sorted[k], dmg = this.map.bDamage[b], top = tm.base[k] + this.map.bHeight(b);
-    const pos = tm.mesh.geometry.getAttribute('position') as THREE.BufferAttribute, col = tm.mesh.geometry.getAttribute('aC') as THREE.BufferAttribute;
-    const p = pos.array as Float32Array, c = col.array as Uint8Array, s = 1 - 0.75 * Math.min(1, dmg * 1.5);
-    for (let v = tm.vStart[k]; v < tm.vStart[k + 1]; v++) {
-      // неровная кромка обрушения
-      const jag = dmg > 0.3 ? (Math.sin(p[v * 3] * 1.7) + Math.sin(p[v * 3 + 2] * 2.3)) * 0.8 * dmg : 0;
-      if (p[v * 3 + 1] > top + jag) p[v * 3 + 1] = Math.max(tm.base[k] + 0.4, top + jag);
-      c[v * 4] *= s; c[v * 4 + 1] *= s; c[v * 4 + 2] *= s;
-      if (dmg > 0.3) c[v * 4 + 3] = 0;
-    }
-    pos.needsUpdate = true; col.needsUpdate = true;
+  private hideAt(tm: TileMesh, k: number) {
+    const pos = tm.mesh.geometry.getAttribute('position') as THREE.BufferAttribute, p = pos.array as Float32Array, a = tm.vStart[k];
+    for (let v = a + 1; v < tm.vStart[k + 1]; v++) { p[v * 3] = p[a * 3]; p[v * 3 + 1] = p[a * 3 + 1]; p[v * 3 + 2] = p[a * 3 + 2]; } // вырожденные треугольники не рисуются
+    pos.needsUpdate = true;
   }
 
-  /** Вызывается после изменения map.bDamage[b]. */
-  damaged(b: number) {
+  /** Убирает здание из геометрии тайла — его теперь рисует модуль разрушений. */
+  hide(b: number) {
     const [cx, cz] = this.map.bCenter(b), tm = this.tiles.get(this.map.tileIndex(cx, cz));
     if (!tm) return;
-    const k = tm.sorted.indexOf(b); if (k >= 0) this.applyDamage(tm, k);
+    const k = tm.sorted.indexOf(b); if (k >= 0) this.hideAt(tm, k);
   }
 
   /** Сброс разрушений: тайлы пересобираются. */
