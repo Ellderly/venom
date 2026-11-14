@@ -1,0 +1,42 @@
+{
+  "name": "venom",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "server": "node server/server.mjs",
+    "map": "python3 tools/build_map.py"
+  },
+  "dependencies": {
+    "earcut": "^3.0.1",
+    "three": "^0.170.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/earcut": "^3.0.0",
+    "@types/three": "^0.170.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  },
+  "description": "VENOM — оборона Киева",
+  "author": "venom",
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "game.venom",
+    "productName": "VENOM",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "server/**",
+      "electron/**",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable"
+    }
+  }
+}
