@@ -8,15 +8,15 @@ import { Launch, State } from './sim';
 import { FX } from './fx';
 
 /** Группа, как она хранится на сервере: откуда и куда едет и с какого момента (x0 = x — стоит на месте). */
-export interface GunRec { id: number; pid: number; by: string; unit: string; x0: number; z0: number; x: number; z: number; t: number }
+export interface GunRec { id: number; pid: number; by: string; unit: string; x0: number; z0: number; x: number; z: number; t: number; path?: number[] }
 export interface Target { L: Launch; s: State; eta: number }
 
 interface Gun {
   rec: GunRec; A: AirDefenseDef; mesh: THREE.Group; mount: THREE.Object3D; barrel: THREE.Object3D; beam: THREE.Mesh; ring: THREE.Mesh;
-  x: number; y: number; z: number; moving: boolean; ready: boolean; wait: number;
+  x: number; y: number; z: number; moving: boolean; ready: boolean; wait: number; route: GunRec | null; pts: number[]; cum: number[];
   target: number; aim: number; ammo: number; reload: number; shot: number; snd: number; yaw: number; pitch: number;
 }
-export interface GunView { id: number; by: string; x: number; y: number; z: number; r: number; moving: boolean; ready: boolean; wait: number; firing: boolean; reload: number; ammo: number; belt: number }
+export interface GunView { path: number[] | null; id: number; by: string; x: number; y: number; z: number; r: number; moving: boolean; ready: boolean; wait: number; firing: boolean; reload: number; ammo: number; belt: number }
 
 const TRACERS = 400, TR_SPEED = 850, TR_LEN = 40;
 
@@ -46,7 +46,7 @@ export class AirDefense {
       const beam = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 12, 1, true).translate(0, -0.5, 0).rotateX(-Math.PI / 2), this.beamMat); beam.visible = false; // вершина в начале координат, раструб в +Z
       const ring = new THREE.Mesh(this.ringGeo, new THREE.MeshBasicMaterial({ color: 0x4aa8ff, transparent: true, opacity: 0.55, depthTest: false, fog: false, side: THREE.DoubleSide })); ring.renderOrder = 29;
       this.group.add(mesh, beam, ring);
-      g = { rec, A, mesh, mount: mesh.getObjectByName('mount') ?? mesh, barrel: mesh.getObjectByName('gun') ?? mesh, beam, ring, x: 0, y: 0, z: 0, moving: false, ready: false, wait: 0, target: 0, aim: 0, ammo: A.belt, reload: 0, shot: 0, snd: 0, yaw: 0, pitch: 0.3 };
+      g = { rec, A, mesh, mount: mesh.getObjectByName('mount') ?? mesh, barrel: mesh.getObjectByName('gun') ?? mesh, beam, ring, x: 0, y: 0, z: 0, moving: false, ready: false, wait: 0, route: null, pts: [], cum: [0], target: 0, aim: 0, ammo: A.belt, reload: 0, shot: 0, snd: 0, yaw: 0, pitch: 0.3 };
       this.guns.set(rec.id, g);
     }
     g.rec = rec; g.target = 0;
@@ -55,16 +55,24 @@ export class AirDefense {
   clear() { for (const id of [...this.guns.keys()]) this.remove(id); this.tr.n = 0; this.pending.clear(); }
   /** Где группа сейчас (для приказа на переезд). */
   posOf(id: number) { const g = this.guns.get(id); return g ? { x: g.x, z: g.z } : null; }
-  views(): GunView[] { return [...this.guns.values()].map(g => ({ id: g.rec.id, by: g.rec.by, x: g.x, y: g.y, z: g.z, r: g.A.range, moving: g.moving, ready: g.ready, wait: g.wait, firing: g.shot > 0 && g.target > 0, reload: g.reload, ammo: g.ammo, belt: g.A.belt })); }
+  views(): GunView[] { return [...this.guns.values()].map(g => ({ path: g.moving || (!g.ready && g.cum.length > 2) ? g.pts : null, id: g.rec.id, by: g.rec.by, x: g.x, y: g.y, z: g.z, r: g.A.range, moving: g.moving, ready: g.ready, wait: g.wait, firing: g.shot > 0 && g.target > 0, reload: g.reload, ammo: g.ammo, belt: g.A.belt })); }
 
-  /** Положение по времени: свёртывание → переезд по прямой → развёртывание. */
+  /** Положение по времени: свёртывание → переезд по маршруту (по дорогам) → развёртывание. */
   private place(g: Gun, now: number) {
-    const r = g.rec, A = g.A, d = Math.hypot(r.x - r.x0, r.z - r.z0), tt = now - r.t, speed = UNITS[r.unit].speed;
-    let k = 1, end = A.placeS; g.moving = false;
-    if (d > 1) { const travel = d / speed; end = A.packS + travel + A.deployS; k = Math.min(1, Math.max(0, (tt - A.packS) / travel)); g.moving = tt > A.packS && k < 1; }
-    g.x = r.x0 + (r.x - r.x0) * k; g.z = r.z0 + (r.z - r.z0) * k; g.y = this.map.surfaceAt(g.x, g.z);
-    g.ready = tt >= end; g.wait = Math.max(0, end - tt);
-    if (d > 1) g.mesh.rotation.y = Math.atan2(r.x - r.x0, r.z - r.z0);
+    const r = g.rec, A = g.A, tt = now - r.t, speed = UNITS[r.unit].speed;
+    if (g.route !== r) { // новый приказ: длины участков маршрута
+      g.route = r; const p = r.path && r.path.length >= 4 ? r.path : [r.x0, r.z0, r.x, r.z]; g.pts = p; g.cum = [0];
+      for (let i = 2; i < p.length; i += 2) g.cum.push(g.cum[g.cum.length - 1] + Math.hypot(p[i] - p[i - 2], p[i + 1] - p[i - 1]));
+    }
+    const d = g.cum[g.cum.length - 1]; let end = A.placeS; g.moving = false; g.x = r.x; g.z = r.z;
+    if (d > 1) {
+      const s = Math.min(d, Math.max(0, (tt - A.packS) * speed)); end = A.packS + d / speed + A.deployS; g.moving = tt > A.packS && s < d;
+      let i = 1; while (i < g.cum.length - 1 && g.cum[i] < s) i++;
+      const k = (s - g.cum[i - 1]) / Math.max(1e-6, g.cum[i] - g.cum[i - 1]), p = g.pts, ax = p[i * 2 - 2], az = p[i * 2 - 1], bx = p[i * 2], bz = p[i * 2 + 1];
+      g.x = ax + (bx - ax) * k; g.z = az + (bz - az) * k;
+      if (g.moving && Math.hypot(bx - ax, bz - az) > 0.5) { const hd = Math.atan2(bx - ax, bz - az); g.mesh.rotation.y += Math.atan2(Math.sin(hd - g.mesh.rotation.y), Math.cos(hd - g.mesh.rotation.y)) * 0.25; }
+    }
+    g.y = this.map.surfaceAt(g.x, g.z); g.ready = tt >= end; g.wait = Math.max(0, end - tt);
   }
 
   /** Вероятность поражения за секунду огня. */

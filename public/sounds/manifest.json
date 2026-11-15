@@ -11,6 +11,12 @@
  "geran5_far": [
   "geran5_cruise_far.ogg"
  ],
+ "kh101_near": [
+  "kalibr_cruise_loop.ogg"
+ ],
+ "kh101_far": [
+  "kalibr_cruise_far.ogg"
+ ],
  "explosion_near": [
   "explosion_near_1.ogg",
   "explosion_near_2.ogg",

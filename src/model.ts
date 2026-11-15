@@ -189,3 +189,32 @@ export function buildPickup(): THREE.Group {
   box(0.6, 0.5, 0.03, 0, 0.1, 0.45, paint, gun);                   // щиток
   return g;
 }
+
+/** Х-101: сплюснутый корпус с гранёным носом, раскрывающееся крыло снизу, три хвостовых руля, ТРДД на пилоне под хвостом. Длина 7,45 м, размах 3 м. */
+export function buildKh101(): THREE.Group {
+  const g = new THREE.Group();
+  const body = std(skin({ size: 1024, base: [112, 118, 122], seamsX: [0, 0.5], seamsY: [0.13, 0.3, 0.5, 0.68, 0.86], draw: (c, b, S) => {
+    c.fillStyle = 'rgba(52,56,60,0.92)'; c.fillRect(0, 0, S, S * 0.13);                         // радиопрозрачный нос
+    c.fillStyle = 'rgba(170,40,34,0.9)'; c.fillRect(0, S * 0.3, S, S * 0.008);
+    hatch(c, b, S * 0.44, S * 0.36, S * 0.12, S * 0.09); hatch(c, b, S * 0.2, S * 0.56, S * 0.1, S * 0.08); hatch(c, b, S * 0.7, S * 0.56, S * 0.1, S * 0.08); hatch(c, b, S * 0.45, S * 0.74, S * 0.1, S * 0.07);
+    label(c, 'Х-101  0417', S * 0.25, S * 0.2, S * 0.034, 'rgba(30,32,34,0.85)', false); label(c, 'Х-101  0417', S * 0.75, S * 0.2, S * 0.034, 'rgba(30,32,34,0.85)', true);
+    soot(c, S, 0.9, 0.5);
+  } }));
+  const panel = std(skin({ size: 512, base: [104, 110, 114], seamsX: [0.3, 0.7], seamsY: [0.4, 0.9], repeat: true }));
+  const metal = new THREE.MeshStandardMaterial({ color: 0x6c6a66, roughness: 0.45, metalness: 0.7 }), hot = new THREE.MeshStandardMaterial({ color: 0x3a332e, roughness: 0.55, metalness: 0.6 }), dark = new THREE.MeshStandardMaterial({ color: 0x141516, roughness: 0.7 });
+  const L = 7.45, z0 = L / 2, prof: number[][] = [[0, z0], [0.08, z0 - 0.1], [0.2, z0 - 0.45], [0.31, z0 - 0.95], [0.37, z0 - 1.6], [0.37, -2.6], [0.33, -3.2], [0.24, -3.6], [0.12, -z0], [0, -z0]];
+  const fus = lathe(prof, 28, body); fus.scale.set(1.12, 1, 0.84); g.add(fus);                    // сплюснутое сечение (масштаб по осям тела вращения: x — ширина, z — высота)
+  // крыло: под фюзеляжем, небольшая стреловидность
+  const hw = 1.5, w = plate([[0, 0.55], [0.3, 0.55], [hw, 0.18], [hw, -0.12], [0.3, 0.0], [-0.3, 0.0], [-hw, -0.12], [-hw, 0.18], [-0.3, 0.55]], 0.07, panel, 0.02); w.position.y += -0.27; g.add(w);
+  // хвост: два руля с отрицательным поперечным V и киль вверх
+  for (const sx of [-1, 1]) { const f = plate([[0, -3.0], [0.75, -3.25], [0.75, -3.55], [0, -3.5]], 0.05, panel, 0.015); f.position.set(sx * 0.2, -0.02, 0); f.rotation.z = sx * 0.35; if (sx < 0) f.scale.x = -1; g.add(f); }
+  const keel = fin([[-3.55, 0.18], [-3.0, 0.18], [-3.3, 0.85], [-3.55, 0.85]], 0.05, panel); g.add(keel);
+  // двигатель на пилоне под хвостовой частью
+  const ny = -0.52, py = fin([[-3.0, -0.42], [-2.3, -0.42], [-2.4, -0.26], [-2.95, -0.26]], 0.08, panel); g.add(py);
+  const nac = lathe([[0.12, -2.05], [0.15, -2.0], [0.17, -2.06], [0.175, -2.3], [0.165, -3.0]], 20, panel); nac.position.y = ny; g.add(nac);
+  const lip = lathe([[0.12, -2.1], [0.12, -2.05], [0.15, -2.0]], 20, metal); lip.position.y = ny; g.add(lip);
+  const fan = new THREE.Mesh(new THREE.CircleGeometry(0.122, 20), dark); fan.position.set(0, ny, -2.08); g.add(fan);
+  const noz = lathe([[0.165, -3.0], [0.14, -3.14], [0.1, -3.2], [0.09, -3.2], [0.08, -3.08]], 20, hot); noz.position.y = ny; g.add(noz);
+  const glow = jetGlow(0.07); glow.position.set(0, ny, -3.19); g.add(glow);
+  return g;
+}

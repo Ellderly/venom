@@ -1,5 +1,10 @@
 // Параметры юнитов. Значения — по открытым источникам; баланс правится здесь, без изменения кода.
 // Меню, арсенал, быстрая панель и карточки строятся из этого файла: новый юнит = новая запись в UNITS.
+import RULES_JSON from '../server/rules.json';
+/** Правила игры, общие для клиента и сервера: цены, экономика, лимиты (server/rules.json). */
+export const RULES = RULES_JSON as { economy: { start: number; income: number; cap: number; refund: number; bounty: number }; cost: Record<string, number>; aaMax: Record<string, number> };
+export type GameMode = 'sandbox' | 'game';
+export const MODE_NAME: Record<GameMode, string> = { sandbox: 'Песочница', game: 'Игра' };
 export type Side = 'attack' | 'defense';
 export const SIDE_NAME: Record<Side, string> = { attack: 'Атака', defense: 'Оборона' };
 
@@ -19,7 +24,8 @@ export const CATEGORIES: Category[] = [
 export interface UnitDef {
   id: string; name: string; alt: string; kind: string; origin: string;
   side: Side; cat: string;
-  cost: number;         // цена в очках (экономика — этап «Игра»; в песочнице не списывается)
+  cost: number;         // цена в очках — из server/rules.json; списывается в режиме «Игра»
+  terrain?: boolean;    // огибает рельеф: держит высоту над землёй, а не над самой высокой точкой маршрута
   reload: number;       // перезарядка, с
   icon: string;         // содержимое <svg viewBox="0 0 64 40">
   speed: number;        // крейсерская скорость, м/с
@@ -52,7 +58,7 @@ export interface AirDefenseDef {
 export const UNITS: Record<string, UnitDef> = {
   geran2: {
     id: 'geran2', name: 'Герань-2', alt: 'Shahed-136', kind: 'Барражирующий боеприпас (дрон-камикадзе)', origin: 'Иран / Россия',
-    side: 'attack', cat: 'drone', cost: 20, reload: 2,
+    side: 'attack', cat: 'drone', cost: RULES.cost.geran2, reload: 2,
     icon: '<path d="M32 2 L35 9 L58 30 L58 35 L38 37 L26 37 L6 35 L6 30 L29 9 Z" fill="currentColor"/><rect x="29.5" y="36" width="5" height="3" fill="#8a6a44"/>',
     speed: 185 / 3.6, cruiseAgl: 300, diveDeg: 55, warheadKg: 50, tntKg: 60, engine: 'piston',
     sounds: { engineNear: 'geran_near', engineFar: 'geran_far', blastNear: 'explosion_near', blastFar: 'explosion_far', debris: 'debris' },
@@ -68,7 +74,7 @@ export const UNITS: Record<string, UnitDef> = {
   },
   geran5: {
     id: 'geran5', name: 'Герань-5', alt: 'реактивная', kind: 'Реактивный ударный дрон (по классу близок к малой крылатой ракете)', origin: 'Россия',
-    side: 'attack', cat: 'drone', cost: 90, reload: 8,
+    side: 'attack', cat: 'drone', cost: RULES.cost.geran5, reload: 8,
     icon: '<path d="M32 1 C34 4 35 9 35 14 L35 16 L62 21 L62 25 L35 24 L34.5 32 L42 34 L42 37 L22 37 L22 34 L29.5 32 L29 24 L2 25 L2 21 L29 16 L29 14 C29 9 30 4 32 1 Z" fill="currentColor"/><rect x="30" y="26" width="4" height="12" rx="2" fill="#8a6a44"/>',
     speed: 500 / 3.6, cruiseAgl: 450, diveDeg: 40, warheadKg: 90, tntKg: 110, engine: 'jet',
     sounds: { engineNear: 'geran5_near', engineFar: 'geran5_far', blastNear: 'explosion_near', blastFar: 'explosion_far', debris: 'debris' },
@@ -85,20 +91,37 @@ export const UNITS: Record<string, UnitDef> = {
   },
 };
 
+UNITS.kh101 = {
+  id: 'kh101', name: 'Х-101', alt: 'крылатая ракета', kind: 'Стратегическая крылатая ракета воздушного базирования', origin: 'Россия',
+  side: 'attack', cat: 'cruise', cost: RULES.cost.kh101, reload: 20,
+  icon: '<path d="M32 1 C34.5 4 35.5 8 35.5 12 L35.5 17 L52 23 L52 26 L35.5 24 L35.5 32 L42 36 L42 38 L34 37 L32 39 L30 37 L22 38 L22 36 L28.5 32 L28.5 24 L12 26 L12 23 L28.5 17 L28.5 12 C28.5 8 29.5 4 32 1 Z" fill="currentColor"/>',
+  speed: 700 / 3.6, cruiseAgl: 110, diveDeg: 30, warheadKg: 450, tntKg: 450, engine: 'jet', terrain: true,
+  sounds: { engineNear: 'kh101_near', engineFar: 'kh101_far', blastNear: 'explosion_near', blastFar: 'explosion_far', debris: 'debris' },
+  card: [
+    ['Длина', '≈ 7,5 м'], ['Размах крыла', '≈ 3 м'], ['Стартовая масса', '≈ 2200–2400 кг'],
+    ['Боевая часть', '≈ 400–450 кг, фугасная или кассетная'],
+    ['Двигатель', 'двухконтурный турбореактивный ТРДД-50А, выдвигается под хвост после пуска'],
+    ['Крейсерская скорость', '≈ 700 км/ч'], ['Дальность', 'заявляется до 5500 км'],
+    ['Высота полёта', 'от 30–70 м над землёй, с огибанием рельефа'], ['Наведение', 'инерциальное + спутниковое, коррекция по рельефу и оптической картинке цели'],
+    ['Носители', 'Ту-95МС, Ту-160'],
+  ],
+  about: 'Тяжёлая ракета, летящая низко и быстро, огибая холмы: услышать её успевают за считаные секунды. Боевая часть в несколько раз мощнее, чем у «Герани», — одно попадание сносит подъезд. Пулемётные группы сбивают её редко. Стоит дорого: это штучный удар по важной цели, а не рой.',
+};
+
 UNITS.mfg = {
   id: 'mfg', name: 'Огневая группа', alt: 'пикап с ДШК', kind: 'Мобильная огневая группа ПВО', origin: 'Украина',
-  side: 'defense', cat: 'short', cost: 30, reload: 15,
+  side: 'defense', cat: 'short', cost: RULES.cost.mfg, reload: 15,
   icon: '<path d="M6 30 L6 22 L20 22 L24 14 L38 14 L40 22 L58 22 L58 30 Z" fill="currentColor"/><circle cx="17" cy="31" r="5" fill="currentColor"/><circle cx="47" cy="31" r="5" fill="currentColor"/><path d="M46 20 L50 12 L62 4" stroke="currentColor" stroke-width="2.5" fill="none"/>',
   speed: 60 / 3.6, cruiseAgl: 0, diveDeg: 0, warheadKg: 0, tntKg: 0, engine: 'piston', sounds: {},
-  aa: { range: 1300, rof: 10, belt: 100, reloadS: 6, aimS: 1.5, pk: 0.06, refSpeed: 55, nightK: 0.65, placeS: 15, packS: 4, deployS: 10, max: 12 },
+  aa: { range: 1300, rof: 10, belt: 100, reloadS: 6, aimS: 1.5, pk: 0.06, refSpeed: 55, nightK: 0.65, placeS: 15, packS: 4, deployS: 10, max: RULES.aaMax.mfg },
   card: [
     ['Вооружение', 'крупнокалиберный пулемёт 12,7 мм (ДШК / M2 Browning)'], ['Дальность огня по воздушным целям', '≈ 1,3 км'],
     ['Темп стрельбы', '≈ 600 выстр./мин'], ['Лента', '100 патронов, смена ≈ 6 с'],
     ['Обнаружение', 'на слух и визуально, ночью — прожектор и тепловизор'],
-    ['Шасси', 'пикап, по городу до 60 км/ч'], ['Развёртывание', '≈ 15 с на новом месте, ≈ 10 с после переезда'],
+    ['Шасси', 'пикап, ездит по дорогам до 60 км/ч'], ['Развёртывание', '≈ 15 с на новом месте, ≈ 10 с после переезда'],
     ['В мире одновременно', 'до 12 групп'],
   ],
-  about: 'Пикап с пулемётом в кузове — самое массовое и дешёвое средство против «Гераней». Одна группа ведёт одну цель: одиночную «Герань-2», идущую прямо над ней, сбивает примерно в двух случаях из трёх, но рой её перегружает, а по реактивной «Герани-5» шансов почти нет. Сбитый дрон падает — и иногда взрывается там, куда упал. Группу можно перегнать на новое место: в дороге она не стреляет.',
+  about: 'Пикап с пулемётом в кузове — самое массовое и дешёвое средство против «Гераней». Одна группа ведёт одну цель: одиночную «Герань-2», идущую прямо над ней, сбивает примерно в двух случаях из трёх, но рой её перегружает, а по реактивной «Герани-5» шансов почти нет. Сбитый дрон падает — и иногда взрывается там, куда упал. Группу можно перегнать на новое место — она едет по дорогам и в пути не стреляет.',
 };
 
 export const unitsOf = (side: Side, cat?: string) => Object.values(UNITS).filter(u => u.side === side && (!cat || u.cat === cat));

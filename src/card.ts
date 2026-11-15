@@ -30,7 +30,7 @@ export class CardView {
       <div class="stats">${(u.aa ? [[(u.aa.range / 1000).toFixed(1).replace('.', ','), 'км дальность'], [u.aa.max, 'групп в мире'], [u.cost, 'очков'], [u.aa.placeS + ' с', 'развёртывание']] : [[Math.round(u.speed * 3.6), 'км/ч'], [u.tntKg, 'кг ТНТ'], [u.cost, 'очков'], [u.reload + ' с', 'перезарядка']]).map(s => `<div><b>${s[0]}</b>${s[1]}</div>`).join('')}</div><div data-a class="row" style="margin-bottom:8px"></div>
       <p>${u.about}</p><div class="tag">${u.kind}</div>
       <table><tr><td>Происхождение</td><td>${u.origin}</td></tr>${u.card.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('')}</table>
-      <p class="note">Данные из открытых источников, приблизительные. Модель построена по реальным габаритам. В песочнице цена и перезарядка не ограничивают запуск.</p>`;
+      <p class="note">Данные из открытых источников, приблизительные. Модель построена по реальным габаритам. В режиме «Игра» цена списывается из очков, в «Песочнице» запуск бесплатный.</p>`;
     host.querySelector('[data-c]')!.append(this.canvas);
     for (const a of actions) { const b = el('button', a.primary ? 'on' : ''); b.textContent = a.label; b.onclick = a.fn; host.querySelector('[data-a]')!.append(b); }
     this.host = host; this.unit = u;

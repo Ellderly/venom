@@ -1,0 +1,5 @@
+{
+  "economy": { "start": 150, "income": 0.5, "cap": 600, "refund": 0.5, "bounty": 0.25 },
+  "cost": { "geran2": 20, "geran5": 90, "kh101": 250, "mfg": 30 },
+  "aaMax": { "mfg": 12 }
+}

@@ -14,6 +14,8 @@ SLOTS = {
     'geran_far':      ['geran_far_loop'],
     'geran5_near':    ['geran5_cruise_loop'],   # ТРД вблизи: вой и гул
     'geran5_far':     ['geran5_cruise_far'],    # реактивный гул вдали
+    'kh101_near':     ['kalibr_cruise_loop'],   # Х-101: в warfront её нет, берём двигатель «Калибра» — ракета того же класса
+    'kh101_far':      ['kalibr_cruise_far'],
     'explosion_near': ['explosion_near_*'],
     'explosion_far':  ['explosion_far_*'],
     'debris':         ['debris_impact*'],

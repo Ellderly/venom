@@ -18,7 +18,7 @@ export interface Settings {
   known: string[]; // юниты, которые уже предлагались на быструю панель
 }
 const DEF: Settings = { nick: '', volume: 0.7, uiScale: 1, perf: true, minimap: true, addr: '', keys: {}, quick: { attack: ['geran2'], defense: [] }, known: ['geran2'] };
-const NEW: [string, Side][] = [['geran5', 'attack'], ['mfg', 'defense']]; // юниты обновлений: один раз встают в первый свободный слот быстрой панели
+const NEW: [string, Side][] = [['geran5', 'attack'], ['mfg', 'defense'], ['kh101', 'attack']]; // юниты обновлений: один раз встают в первый свободный слот быстрой панели
 
 export const S: Settings = (() => {
   let s: Partial<Settings> = {};

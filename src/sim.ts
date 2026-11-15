@@ -27,13 +27,16 @@ export interface State { x: number; y: number; z: number; vx: number; vy: number
 /** Положение и скорость цели через t секунд после запуска. */
 export function trajectory(L: Launch, map: MapData, t: number, out: State): State {
   const u = UNITS[L.unit], dx = L.tx - L.sx, dz = L.tz - L.sz, D = Math.hypot(dx, dz) || 1, ux = dx / D, uz = dz / D;
+  // огибание рельефа: высота над самой высокой точкой на участке от 300 м позади до 600 м впереди
+  const follow = (s: number) => { let top = -1e9; for (let o = -300; o <= 600; o += 150) { const q = Math.min(D, Math.max(0, s + o)); top = Math.max(top, map.heightAt(L.sx + ux * q, L.sz + uz * q)); } return top + L.cruiseY; };
   const pos = (tt: number, o: { x: number; y: number; z: number }) => {
     const s = Math.min(tt * u.speed, D), k = s / D;
     // лёгкое рыскание по курсу, затухает к началу и концу маршрута
     const amp = Math.min(60, D * 0.02) * Math.sin(Math.PI * k) , w = Math.sin(s / 700 + L.seed) * amp;
     o.x = L.sx + ux * s - uz * w; o.z = L.sz + uz * s + ux * w;
-    const ty = map.heightAt(L.tx, L.tz), dd = (L.cruiseY - ty) / Math.tan(u.diveDeg * Math.PI / 180), rem = D - s;
-    if (rem < dd) { const q = 1 - rem / dd; o.y = L.cruiseY - (L.cruiseY - ty) * q * q * (1.6 - 0.6 * q); } else o.y = L.cruiseY;
+    const cy = u.terrain ? follow(s) : L.cruiseY;
+    const ty = map.heightAt(L.tx, L.tz), dd = (cy - ty) / Math.tan(u.diveDeg * Math.PI / 180), rem = D - s;
+    if (rem < dd) { const q = 1 - rem / dd; o.y = cy - (cy - ty) * q * q * (1.6 - 0.6 * q); } else o.y = cy;
     if (tt * u.speed > D) o.y -= (tt * u.speed - D) * 0.8; // на случай, если пролетел точку цели, не встретив препятствий
   };
   const a = { x: 0, y: 0, z: 0 }; pos(t, out); pos(t + 0.05, a);
@@ -46,11 +49,12 @@ export function planLaunch(L: Launch, map: MapData) {
   const u = UNITS[L.unit], D = Math.hypot(L.tx - L.sx, L.tz - L.sz);
   const agl = Math.min(u.cruiseAgl, Math.max(60, D * 0.35));
   let top = 0; for (let k = 0; k <= 20; k++) top = Math.max(top, map.heightAt(L.sx + (L.tx - L.sx) * k / 20, L.sz + (L.tz - L.sz) * k / 20));
-  L.cruiseY = top + agl; L.dur = D / u.speed;
+  L.cruiseY = u.terrain ? agl : top + agl; L.dur = D / u.speed; // при огибании рельефа cruiseY — высота над землёй
   const s: State = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 };
   const tDive = Math.max(0, L.dur - (agl + 150) / Math.tan(u.diveDeg * Math.PI / 180) / u.speed - 2);
   const step = Math.min(0.02, 1 / u.speed); // не больше метра за шаг: быстрая цель не должна проскочить стену или мост
-  for (let t = tDive; t < L.dur + 5; t += step) {
+  // низколетящая цель может врезаться в высотку или мост по дороге — проверяем весь маршрут (до пикирования — крупным шагом)
+  for (let t = u.terrain ? 0 : tDive; t < L.dur + 5; t += t < tDive ? 4 / u.speed : step) {
     trajectory(L, map, t, s);
     const b = obstacle(map, s);
     if (b !== -1) { const g = map.heightAt(s.x, s.z); L.impactT = t; L.ix = s.x; L.iy = Math.max(s.y, g); L.iz = s.z; L.building = Math.max(b, -1); return; }

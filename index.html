@@ -111,6 +111,10 @@ kbd { background: #222a31; border: 1px solid var(--line); border-radius: 4px; pa
 .lbl.gun { background: rgba(14,60,110,.88); border-color: #4aa8ff; }
 .lbl.gun.sel { background: #fff; color: #0b2238; }
 .lbl.down { background: rgba(40,40,40,.85); border-color: #999; }
+#points { padding: 5px 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#points b { color: var(--acc); }
+.tile.poor { opacity: .45; }
+.tile.poor .meta span:first-child { color: #ff7a66; }
 .lbl::after { content: ''; position: absolute; left: 50%; bottom: -6px; margin-left: -4px; border: 4px solid transparent; border-top-color: #ff8a70; border-bottom: 0; }
 .lbl.gun::after { border-top-color: #4aa8ff; }
 .lbl.down::after { border-top-color: #999; }
@@ -180,6 +184,7 @@ kbd { background: #222a31; border: 1px solid var(--line); border-radius: 4px; pa
   <div id="top">
     <div class="panel"><span id="clock">15:00</span><span id="tspeed" class="dim">×10</span><span id="sess" class="dim"></span></div>
     <button id="sideBadge" title="Сменить сторону"></button>
+    <span id="points" class="panel" title="Очки: списываются за запуск и постановку, пополняются со временем"></span>
     <div class="sp"></div>
     <button id="btnPlayers">Игроки</button><button id="btnMap">Карта</button><button id="btnMenu">Меню</button>
   </div>

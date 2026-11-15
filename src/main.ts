@@ -6,9 +6,10 @@ import { Buildings } from './buildings';
 import { CityCamera } from './camera';
 import { FX } from './fx';
 import { Sound, Heard } from './audio';
-import { buildGeran2, buildGeran5, buildPickup } from './model';
+import { buildGeran2, buildGeran5, buildPickup, buildKh101 } from './model';
+import { Roads } from './roads';
 import { AirDefense, GunRec } from './aa';
-import { UNITS, UnitDef, Side, SIDE_NAME, CATEGORIES, unitsOf } from './units';
+import { UNITS, UnitDef, Side, SIDE_NAME, CATEGORIES, unitsOf, RULES, GameMode, MODE_NAME } from './units';
 import { Launch, State, planLaunch, planDown, flightState, endOf } from './sim';
 import { Destruction } from './voxels';
 import { Session, Msg, Player, Worlds, WorldInfo, worldStore, remoteSession } from './net';
@@ -33,7 +34,15 @@ renderer.info.autoReset = false; // кадр состоит из несколь�
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace; // свои шейдеры сами переводят цвет в sRGB
 const scene = new THREE.Scene();
 const map = new MapData(), sound = new Sound(); sound.volume = S.volume;
-let aa: AirDefense;
+let aa: AirDefense, roads: Roads;
+// экономика: режим мира и свои очки (сервер присылает остаток, доход досчитываем сами до следующей рассылки)
+let gameMode: GameMode = 'sandbox', pointsAt = 0;
+const myPoints = () => { const p = me(); return p && session ? Math.min(RULES.economy.cap, (p.points ?? 0) + RULES.economy.income * Math.max(0, session.now() - pointsAt)) : 0; };
+/** Хватает ли очков; в песочнице — всегда. Если нет — подсказка в ленту. */
+function afford(cost: number, what: string) {
+  if (gameMode !== 'game' || myPoints() >= cost) return true;
+  const need = cost - myPoints(); feed(`Не хватает очков на «${what}»: нужно ${cost}, есть ${Math.floor(myPoints())}. Накопится через ${fmt(need / RULES.economy.income)}`, 'sys'); return false;
+}
 let env: Env, ground: Ground, buildings: Buildings, cc: CityCamera, fx: FX, destr: Destruction, tac: TacMap, mini: Minimap, trees: Trees, bridges: Bridges, landmarks: Landmarks;
 let shadows: Shadows | null = null, post: Post | null = null;
 let session: Session | null = null, worlds: Worlds;
@@ -44,8 +53,8 @@ interface Drone { L: Launch; mesh: THREE.Group; prop: THREE.Object3D | null; glo
 const drones = new Map<number, Drone>();
 const hits: { x: number; z: number }[] = [];
 /** Модели юнитов: по одной заготовке на тип, в игру идут копии. */
-const protos: Record<string, THREE.Group> = { geran2: buildGeran2(), geran5: buildGeran5(), mfg: buildPickup() };
-const builders: Record<string, () => THREE.Group> = { geran2: buildGeran2, geran5: buildGeran5, mfg: buildPickup };
+const protos: Record<string, THREE.Group> = { geran2: buildGeran2(), geran5: buildGeran5(), kh101: buildKh101(), mfg: buildPickup() };
+const builders: Record<string, () => THREE.Group> = { geran2: buildGeran2, geran5: buildGeran5, kh101: buildKh101, mfg: buildPickup };
 const cards = new CardView(builders); // карточке — своя копия модели: у неё другой рендерер и обычный вывод цвета
 // Сцена выводит цвет без преобразования (свои шейдеры отдают готовый sRGB) — стандартным материалам моделей добавляем его сами, иначе они почти чёрные.
 for (const p of Object.values(protos)) p.traverse(o => {
@@ -94,6 +103,7 @@ function renderLaunch() {
   const km = launchUI.mode * u.speed / 1000;
   $('launchNote').textContent = launchUI.mode === 0 ? `Летит с реальной скоростью ${Math.round(u.speed * 3.6)} км/ч от точки клика: 10 км — примерно ${fmt(10000 / u.speed)}.`
     : `Скорость реальная (${Math.round(u.speed * 3.6)} км/ч), поэтому цель появится в ${km.toFixed(1)} км от точки удара.`;
+  if (gameMode === 'game') { const ts = launchUI.count > 1 ? swarm(u) : [u]; let total = 0; for (let i = 0; i < launchUI.count; i++) total += ts[i % ts.length].cost; $('launchNote').textContent += ` Стоимость запуска: ${total} очк.`; }
   if (launchUI.count > 1 && swarm(u).length > 1) $('launchNote').textContent += launchUI.mode === 0 ? ' Смешанный рой стартует из одной точки: быстрые прилетят раньше.' : ' Смешанный рой: каждый тип стартует со своей дальности, чтобы все подошли одновременно.';
   $('tacHint').innerHTML = $('step').innerHTML;
 }
@@ -103,17 +113,21 @@ function clickWorld(x: number, z: number) {
   if (!session) return false;
   if (aaUI.sel && aaUI.move) { // приказ на переезд выбранной группы
     const p = aa.posOf(aaUI.sel); if (!p || !canStand(x, z)) return true;
-    session.send({ type: 'aaMove', id: aaUI.sel, x0: p.x, z0: p.z, x, z }); aaUI.move = false; canvas.classList.remove('aim'); renderLaunch(); return true;
+    const path = roads.route(p.x, p.z, x, z); // едет только по дорогам
+    if (!path) { feed('Туда нет дороги: выберите место ближе к улице или на этом берегу', 'sys'); return true; }
+    session.send({ type: 'aaMove', id: aaUI.sel, x0: p.x, z0: p.z, x, z, path }); aaUI.move = false; canvas.classList.remove('aim'); renderLaunch(); return true;
   }
   const u = launchUI.armed; if (!u) return false;
   if (u.aa) { // постановка огневой группы
     if (aa.count >= u.aa.max) { feed(`Больше ${u.aa.max} групп поставить нельзя — снимите или перегоните имеющиеся`, 'sys'); return true; }
-    if (canStand(x, z)) session.send({ type: 'aaPlace', unit: u.id, x, z });
+    if (canStand(x, z) && afford(u.cost, u.name)) session.send({ type: 'aaPlace', unit: u.id, x, z });
     return true;
   }
   if (launchUI.step === 0) { launchUI.tx = x; launchUI.tz = z; launchUI.step = 1; marker.position.set(x, map.heightAt(x, z) + 1, z); marker.visible = true; renderLaunch(); return true; }
   let dx = x - launchUI.tx, dz = z - launchUI.tz; const d = Math.hypot(dx, dz); if (d < 30) return true; dx /= d; dz /= d;
   const types = launchUI.count > 1 ? swarm(u) : [u];
+  let total = 0; for (let i = 0; i < launchUI.count; i++) total += types[i % types.length].cost;
+  if (!afford(total, launchUI.count > 1 ? `рой ×${launchUI.count}` : u.name)) return true;
   for (let i = 0; i < launchUI.count; i++) {
     const ui = types[i % types.length], dist = launchUI.mode === 0 ? Math.max(d, 400) : launchUI.mode * ui.speed;
     const k = i === 0 ? 0 : 1, lat = (Math.random() - 0.5) * 500 * k, back = Math.random() * 700 * k, sc = (Math.random() - 0.5) * 140 * k, sc2 = (Math.random() - 0.5) * 140 * k;
@@ -224,7 +238,7 @@ function removeDrone(d: Drone) { scene.remove(d.mesh); d.label.remove(); d.row.r
 function resetDamage() { map.bDamage.fill(0); destr.reset(); buildings.reset(); bridges.reset(); fx.clear(); hits.length = 0; for (const d of [...drones.values()]) removeDrone(d); }
 
 function setPlayers(list: Player[], quiet = false) {
-  const old = players, was = mySide(); players = list;
+  const old = players, was = mySide(); players = list; pointsAt = session?.now() ?? 0;
   const myId = session?.me;
   if (!quiet && session?.online) for (const p of list) { // лента: кто пришёл, кто сменил сторону
     const o = old.find(x => x.id === p.id);
@@ -239,9 +253,11 @@ function setPlayers(list: Player[], quiet = false) {
 }
 
 function onMsg(m: Msg) {
-  if (m.type === 'welcome') { if (m.env) { env.hour = m.env.hour; env.speed = m.env.speed; } setPlayers(m.players, true); aa.clear(); (m.guns ?? []).forEach(g => aa.upsert(g)); m.launches.forEach(addDrone); if (m.launches.length) feed(`Мир загружен: попаданий ${m.launches.length}`, 'sys'); }
+  if (m.type === 'welcome') { gameMode = m.mode ?? 'sandbox'; if (m.env) { env.hour = m.env.hour; env.speed = m.env.speed; } setPlayers(m.players, true); aa.clear(); (m.guns ?? []).forEach(g => aa.upsert(g)); m.launches.forEach(addDrone); if (m.launches.length) feed(`Мир загружен: попаданий ${m.launches.length}`, 'sys'); }
   else if (m.type === 'launch') addDrone(m.launch);
   else if (m.type === 'down') onDown(m.id, m.t, m.gun);
+  else if (m.type === 'mode') { gameMode = m.mode; feed(m.mode === 'game' ? `Режим «Игра»: запуск и постановка стоят очков. У всех по ${RULES.economy.start}, доход ${RULES.economy.income * 60} в минуту` : 'Режим «Песочница»: всё бесплатно', 'sys'); if (launchUI.armed) renderLaunch(); }
+  else if (m.type === 'deny') feed(m.reason, 'sys');
   else if (m.type === 'aa') onGun(m.gun);
   else if (m.type === 'aaDel') { aa.remove(m.id); if (aaUI.sel === m.id) selectGun(0); else if (launchUI.armed?.aa) renderLaunch(); if (mySide() === 'defense') feed(`Огневая группа №${m.id} снята`, 'sys'); }
   else if (m.type === 'env') { env.hour = m.hour; env.speed = m.speed; }
@@ -388,7 +404,7 @@ function showPause() {
     <button class="big" id="pPlayers">Игроки<small>Кто на сервере</small></button>
     <button class="big" id="pSettings">Настройки</button>
     <button class="big" id="pHelp">Как играть</button>
-    <button class="big" id="pAdmin">Админ-панель<small>Время суток, сброс разрушений</small></button>
+    <button class="big" id="pAdmin">Админ-панель<small>Время суток, режим игры, сброс разрушений</small></button>
     <button class="big" id="pExit">Выйти в главное меню</button>`, { id: 'pause', onClose: syncLock });
   m.q('#pSide').onclick = () => { m.close(); pickSide(); };
   m.q('#pPlayers').onclick = () => { m.close(); const s = modal('<div id="psBody" style="width:680px;max-width:88vw"></div><p></p><button data-close>Закрыть</button>', { onClose: syncLock }); renderScore(); s.q('#psBody').innerHTML = $('scoreBody').innerHTML; syncLock(); };
@@ -405,12 +421,15 @@ function showAdmin() {
     <label>Время суток <input type="range" id="ah" min="0" max="24" step="0.05" value="${env.hour}"> <b id="ahv">${env.clock()}</b></label>
     <label>Скорость времени <select id="as">${speeds.map(s => `<option value="${s}" ${s === env.speed ? 'selected' : ''}>${s === 0 ? 'пауза' : '×' + s}</option>`).join('')}</select></label>
     <p class="note">×1 — как в жизни, ×60 — час за минуту, ×3600 — сутки за 24 секунды. В сетевой игре меняется у всех.</p>
+    <label>Режим <select id="am">${(['sandbox', 'game'] as GameMode[]).map(k => `<option value="${k}" ${k === gameMode ? 'selected' : ''}>${MODE_NAME[k]}</option>`).join('')}</select></label>
+    <p class="note">«Песочница» — всё бесплатно. «Игра» — запуск целей и постановка ПВО стоят очков: на старте ${RULES.economy.start}, доход ${RULES.economy.income * 60} в минуту, копится не больше ${RULES.economy.cap}. За снятую группу возвращается ${RULES.economy.refund * 100} % цены, за сбитую цель обороне — ${RULES.economy.bounty * 100} % её цены. Переезд групп бесплатный. При смене режима очки у всех сбрасываются.</p>
     <button id="ar">Сбросить разрушения</button> <button data-close>Закрыть</button></div>`, { onClose: syncLock });
   const push = () => session?.send({ type: 'env', hour: env.hour, speed: env.speed });
   m.q<HTMLInputElement>('#ah').oninput = e => { env.hour = Number((e.target as HTMLInputElement).value) % 24; m.q('#ahv').textContent = env.clock(); };
   m.q<HTMLInputElement>('#ah').onchange = push;
   m.q<HTMLSelectElement>('#as').onchange = e => { env.speed = Number((e.target as HTMLSelectElement).value); push(); };
   m.q('#ar').onclick = () => session?.send({ type: 'reset' });
+  m.q<HTMLSelectElement>('#am').onchange = e => session?.send({ type: 'mode', mode: (e.target as HTMLSelectElement).value as GameMode });
   syncLock();
 }
 /** Пока открыто окно, карта или главное меню — клавиши камеры не действуют. */
@@ -556,7 +575,7 @@ function frame(nowMs: number) {
   cards.render(dt, nowMs);
   if (session && (tac.open || (S.minimap && frameNo % 6 === 0))) {
     const u = launchUI.armed; tacData.cam.x = t.x; tacData.cam.z = t.z; tacData.cam.yaw = cc.yawNow; tacData.cam.dist = t.dist; tacData.cursor = tac.cursor;
-    tacData.guns.length = 0; if (mySide() === 'defense') for (const g of aa.views()) tacData.guns.push({ x: g.x, z: g.z, r: g.r, ready: g.ready, sel: g.id === aaUI.sel, label: `№${g.id}` });
+    tacData.guns.length = 0; if (mySide() === 'defense') for (const g of aa.views()) tacData.guns.push({ x: g.x, z: g.z, r: g.r, ready: g.ready, sel: g.id === aaUI.sel, label: `№${g.id}`, path: g.path });
     tacData.aim = u && launchUI.step === 1 ? { tx: launchUI.tx, tz: launchUI.tz, rings: launchUI.mode ? [{ r: launchUI.mode * u.speed, label: `точка появления · ${fmt(launchUI.mode)}` }] : [15, 60, 180].map(s => ({ r: s * u.speed, label: fmt(s) })) } : null;
     if (tac.open) { tac.draw(tacData); $('tacInfo').textContent = `· целей в воздухе: ${drones.size} · попаданий: ${hits.length}`; } else mini.draw(tacData);
   }
@@ -564,6 +583,11 @@ function frame(nowMs: number) {
   if (fpsT > 0.5) {
     const fps = fpsN / fpsAcc, i = renderer.info.render;
     if (S.perf) $('perf').textContent = `${fps.toFixed(0)} к/с · ${(1000 / fps).toFixed(1)} мс · вызовов ${i.calls} · треуг. ${(i.triangles / 1e6).toFixed(2)} млн\nтайлов ${buildings.stats.tiles} · частиц ${fx.count} · деревьев ${trees.count} · обломков ${destr.debris} · разрешение ${Math.round(dyn * 100)}% · ${Q.name}`;
+    if (session) { // очки и доступность юнитов по цене
+      const game = gameMode === 'game', pts = myPoints();
+      $('points').innerHTML = game ? `Очки: <b>${Math.floor(pts)}</b> <span class="dim">+${RULES.economy.income * 60}/мин</span>` : '<span class="dim">Песочница</span>';
+      document.querySelectorAll<HTMLElement>('#arsenal .tile, #quick .q.full').forEach(t => t.classList.toggle('poor', game && (UNITS[t.dataset.unit ?? '']?.cost ?? 0) > pts));
+    }
     $('clock').textContent = env.clock(); $('tspeed').textContent = env.speed ? `×${env.speed}` : 'пауза';
     const nd = fps < 40 ? Math.max(0.5, dyn - 0.1) : fps > 57 ? Math.min(1, dyn + 0.05) : dyn;
     if (nd !== dyn && document.hasFocus() && !location.search.includes('nodyn')) { dyn = nd; resize(); }
@@ -583,7 +607,7 @@ async function boot() {
   landmarks = new Landmarks(map); // до зданий: убирает дома OSM под моделями
   buildings = new Buildings(map, Q); fx = new FX(Q.particles); destr = new Destruction(map, buildings.mat, fx, Q.voxel, Q.debris);
   trees = new Trees(map, Q); bridges = new Bridges(map, fx, destr);
-  aa = new AirDefense(map, fx, unit => protos[unit]?.clone() ?? null);
+  aa = new AirDefense(map, fx, unit => protos[unit]?.clone() ?? null); roads = new Roads(map);
   scene.add(ground.group, buildings.group, landmarks.group, bridges.group, trees.group, destr.group, trees.lampGroup, fx.group, aa.group, marker, aimLine);
   if (Q.shadow) { shadows = new Shadows(Q.shadow); shadows.casters.push(buildings.group, landmarks.group, bridges.group, trees.group, destr.group); }
   if (usePost) post = new Post(renderer, Q.msaa, Q.bloom);
@@ -600,7 +624,7 @@ async function boot() {
   $('btnCancel').onclick = () => { arm(null); selectGun(0); }; $('arMin').onclick = () => $('arsenal').classList.toggle('min');
   $<HTMLInputElement>('arSearch').oninput = renderArsenal;
   syncLock();
-  (window as any).venom = { U, map, cc, env, drones, aa, buildings, ground, fx, destr, trees, bridges, landmarks, arm, clickWorld, UNITS, S, scene, renderer, get session() { return session; }, get players() { return players; } };
+  (window as any).venom = { U, map, cc, env, drones, aa, roads, buildings, ground, fx, destr, trees, bridges, landmarks, arm, clickWorld, UNITS, S, scene, renderer, get session() { return session; }, get players() { return players; } };
   requestAnimationFrame(frame);
 }
 boot().catch(e => { $('loadText').textContent = 'Ошибка загрузки: ' + (e?.message ?? e); console.error(e); });

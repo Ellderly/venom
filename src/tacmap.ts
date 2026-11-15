@@ -9,7 +9,7 @@ export interface TacData {
   aim: { tx: number; tz: number; rings: { r: number; label: string }[] } | null;
   cursor: { x: number; z: number } | null;
   /** Огневые группы ПВО (видит только оборона). */
-  guns: { x: number; z: number; r: number; ready: boolean; sel: boolean; label: string }[];
+  guns: { x: number; z: number; r: number; ready: boolean; sel: boolean; label: string; path: number[] | null }[];
 }
 
 function drawDrone(g: CanvasRenderingContext2D, px: number, py: number, hdg: number, s: number) {
@@ -69,6 +69,7 @@ export class TacMap {
     if (k > 0.035) for (const mk of this.marks) { const x = X(mk.x), y = Y(mk.z); g.fillStyle = '#ffe9a8'; g.beginPath(); g.moveTo(x, y - 5); g.lineTo(x + 4, y); g.lineTo(x, y + 5); g.lineTo(x - 4, y); g.fill(); g.fillStyle = 'rgba(255,240,200,0.9)'; g.fillText(mk.name, x, y + 17); } // знаковые объекты — ориентиры
     for (const h of d.hits) { const x = X(h.x), y = Y(h.z); g.fillStyle = 'rgba(20,10,8,0.85)'; g.beginPath(); g.arc(x, y, Math.max(2.5, 40 * k), 0, 6.283); g.fill(); g.strokeStyle = '#ff9a3d'; g.lineWidth = 1; g.stroke(); }
     for (const q of d.guns) { // зона огня и сама группа
+      if (q.path) { g.strokeStyle = 'rgba(160,210,255,0.9)'; g.lineWidth = 1.5; g.setLineDash([4, 3]); g.beginPath(); for (let i = 0; i < q.path.length; i += 2) g[i ? 'lineTo' : 'moveTo'](X(q.path[i]), Y(q.path[i + 1])); g.stroke(); g.setLineDash([]); } // маршрут переезда
       const x = X(q.x), y = Y(q.z); g.lineWidth = q.sel ? 2 : 1.2; g.strokeStyle = q.sel ? '#fff' : q.ready ? 'rgba(74,168,255,0.9)' : 'rgba(74,168,255,0.4)'; g.fillStyle = 'rgba(74,168,255,0.08)';
       g.beginPath(); g.arc(x, y, q.r * k, 0, 6.283); g.fill(); g.stroke();
       g.fillStyle = q.ready ? '#4aa8ff' : '#7f93a6'; g.fillRect(x - 4, y - 4, 8, 8); g.fillStyle = '#cfe6ff'; g.fillText(q.label, x, y + 17);

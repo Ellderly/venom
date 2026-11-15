@@ -41,12 +41,19 @@ function createWorld(name, extra = {}) {
 let world = null;              // активный мир
 let launches = [], nextId = 1;
 let guns = [], nextGun = 1;   // огневые группы ПВО
-const AA = { mfg: { max: 12 } }; // какие средства ПВО можно ставить и сколько (совпадает с src/units.ts)
+// Правила, общие с клиентом: цены, экономика, лимиты.
+const RULES = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'rules.json'), 'utf8'));
+const E = RULES.economy, COST = RULES.cost, AA = RULES.aaMax;
+let mode = 'sandbox';         // 'sandbox' — без очков, 'game' — запуск и постановка стоят очков
+const wallets = new Map();    // ник → { p, at }: очки сохраняются за игроком, пока открыт мир
+const bal = me => Math.min(E.cap, me.wallet.p + E.income * (now() - me.wallet.at));
+const setBal = (me, v) => { me.wallet.p = Math.max(0, Math.min(E.cap, v)); me.wallet.at = now(); };
+const spend = (me, c) => { if (mode !== 'game') return true; const b = bal(me); if (b < c) return false; setBal(me, b - c); return true; };
 let env = { hour: 15, speed: 10, at: now() };
 const hourNow = () => (env.hour + (now() - env.at) * env.speed / 3600) % 24;
 
 let saveTimer = null;
-const flush = () => { clearTimeout(saveTimer); saveTimer = null; if (!world) return; world.launches = launches; world.guns = guns; world.env = { hour: hourNow(), speed: env.speed }; world.updated = Date.now(); try { fs.writeFileSync(worldFile(world.id), JSON.stringify(world)); } catch (e) { console.error('VENOM: мир не сохранён', e.message); } };
+const flush = () => { clearTimeout(saveTimer); saveTimer = null; if (!world) return; world.launches = launches; world.guns = guns.map(g => ({ ...g, path: undefined })); world.mode = mode; world.env = { hour: hourNow(), speed: env.speed }; world.updated = Date.now(); try { fs.writeFileSync(worldFile(world.id), JSON.stringify(world)); } catch (e) { console.error('VENOM: мир не сохранён', e.message); } };
 const save = () => { if (!saveTimer) saveTimer = setTimeout(flush, 500); };
 setInterval(() => { if (players.size) save(); }, 60000).unref();
 for (const s of ['SIGINT', 'SIGTERM']) process.on(s, () => { flush(); process.exit(0); });
@@ -56,7 +63,8 @@ function openWorld(id) {
   flush(); world = w;
   launches = w.launches.map(L => ({ ...L, t0: -1e7 })); // всё, что было в воздухе при выходе, считается долетевшим
   nextId = launches.reduce((m, L) => Math.max(m, (L.id || 0) + 1), 1);
-  guns = (w.guns || []).map(g => ({ ...g, x0: g.x, z0: g.z, t: -1e7 })); nextGun = guns.reduce((m, g) => Math.max(m, (g.id || 0) + 1), 1); // после загрузки все группы стоят на местах
+  mode = w.mode === 'game' ? 'game' : 'sandbox'; wallets.clear();
+  guns = (w.guns || []).map(g => ({ ...g, x0: g.x, z0: g.z, t: -1e7, path: undefined })); nextGun = guns.reduce((m, g) => Math.max(m, (g.id || 0) + 1), 1); // после загрузки все группы стоят на местах
   env = { hour: Number(w.env?.hour) || 15, speed: Number(w.env?.speed) || 0, at: now() };
   console.log(`VENOM: открыт мир «${w.name}», попаданий: ${launches.length}`);
   return true;
@@ -124,11 +132,11 @@ const players = new Map(); // ws -> { id, name, side, launches, hits, ping }
 let nextPlayer = 1;
 const send = (ws, m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); };
 const broadcast = m => { const s = JSON.stringify(m); for (const ws of players.keys()) if (ws.readyState === 1) ws.send(s); };
-const roster = () => [...players.values()];
+const roster = () => [...players.values()].map(({ wallet, ...p }) => ({ ...p, points: Math.round(bal({ wallet }) * 10) / 10 }));
 const sendRoster = () => broadcast({ type: 'players', players: roster() });
 function kickAll(reason) { for (const ws of players.keys()) { send(ws, { type: 'closed', reason }); ws.close(); } players.clear(); }
 function uniqueName(name, self) {
-  const taken = new Set(roster().filter(p => p !== self).map(p => p.name.toLowerCase()));
+  const taken = new Set([...players.values()].filter(p => p !== self).map(p => p.name.toLowerCase()));
   if (!taken.has(name.toLowerCase())) return name;
   for (let i = 2; ; i++) if (!taken.has(`${name} (${i})`.toLowerCase())) return `${name} (${i})`;
 }
@@ -142,14 +150,16 @@ wss.on('connection', ws => {
       if (me || !world) return;
       me = { id: nextPlayer++, name: '', side: SIDES.includes(m.side) ? m.side : null, launches: 0, hits: 0, downs: 0, ping: 0 };
       me.name = uniqueName(cleanName(m.name, 'Игрок ' + me.id), me);
+      me.wallet = wallets.get(me.name) ?? { p: E.start, at: now() }; wallets.set(me.name, me.wallet);
       players.set(ws, me);
-      send(ws, { type: 'welcome', you: me.id, now: now(), world: world.name, players: roster(), launches, guns, env: { hour: hourNow(), speed: env.speed } });
+      send(ws, { type: 'welcome', you: me.id, now: now(), world: world.name, players: roster(), launches, guns, mode, env: { hour: hourNow(), speed: env.speed } });
       sendRoster();
       return;
     }
     if (!me) return;
     if (m.type === 'launch' && validLaunch(m.launch) && launches.length < 5000) {
-      if (me.side !== 'attack') return; // запускает только сторона атаки
+      if (me.side !== 'attack' || !(m.launch.unit in COST)) return; // запускает только сторона атаки
+      if (!spend(me, COST[m.launch.unit])) { send(ws, { type: 'deny', reason: 'Не хватает очков' }); return; }
       const L = m.launch; L.id = nextId++; L.by = me.name; L.pid = me.id; L.t0 = now() + 0.25; // небольшой запас, чтобы у всех старт был одновременным
       launches.push(L); me.launches++; broadcast({ type: 'launch', launch: L }); sendRoster(); save();
     } else if (m.type === 'hit') { // владелец запуска сообщает результат — для таблицы игроков
@@ -159,21 +169,28 @@ wss.on('connection', ws => {
       const L = launches.find(x => x.id === m.id), t = Number(m.t);
       if (L && !L.down && Number.isFinite(t) && t > 0 && t < L.impactT && now() < L.t0 + L.impactT + 2) {
         const g = guns.find(x => x.id === m.gun); L.down = { t, gun: g ? g.id : 0 };
-        const owner = g && roster().find(p => p.id === g.pid); if (owner) owner.downs++;
+        const owner = g && [...players.values()].find(p => p.id === g.pid); if (owner) { owner.downs++; if (mode === 'game') setBal(owner, bal(owner) + E.bounty * (COST[L.unit] || 0)); }
         broadcast({ type: 'down', id: L.id, t, gun: L.down.gun }); sendRoster(); save();
       }
     } else if (m.type === 'aaPlace') {
       const x = Number(m.x), z = Number(m.z);
-      if (me.side !== 'defense' || !AA[m.unit] || !Number.isFinite(x) || !Number.isFinite(z) || guns.filter(g => g.unit === m.unit).length >= AA[m.unit].max) return;
+      if (me.side !== 'defense' || !AA[m.unit] || !Number.isFinite(x) || !Number.isFinite(z) || guns.filter(g => g.unit === m.unit).length >= AA[m.unit]) return;
+      if (!spend(me, COST[m.unit] || 0)) { send(ws, { type: 'deny', reason: 'Не хватает очков' }); return; }
       const g = { id: nextGun++, pid: me.id, by: me.name, unit: m.unit, x0: x, z0: z, x, z, t: now() };
-      guns.push(g); broadcast({ type: 'aa', gun: g }); save();
+      guns.push(g); broadcast({ type: 'aa', gun: g }); sendRoster(); save();
     } else if (m.type === 'aaMove') {
       const g = guns.find(x => x.id === m.id), v = [m.x0, m.z0, m.x, m.z].map(Number);
+      const p = Array.isArray(m.path) && m.path.length >= 4 && m.path.length <= 1200 && m.path.length % 2 === 0 && m.path.every(Number.isFinite) ? m.path : undefined; // маршрут по дорогам считает клиент
       if (me.side !== 'defense' || !g || !v.every(Number.isFinite)) return;
-      [g.x0, g.z0, g.x, g.z] = v; g.t = now(); g.pid = me.id; g.by = me.name; broadcast({ type: 'aa', gun: g }); save();
+      [g.x0, g.z0, g.x, g.z] = v; g.path = p; g.t = now(); g.pid = me.id; g.by = me.name; broadcast({ type: 'aa', gun: g }); save();
     } else if (m.type === 'aaDel') {
-      if (me.side !== 'defense' || !guns.some(x => x.id === m.id)) return;
-      guns = guns.filter(x => x.id !== m.id); broadcast({ type: 'aaDel', id: m.id }); save();
+      const g = guns.find(x => x.id === m.id); if (me.side !== 'defense' || !g) return;
+      guns = guns.filter(x => x.id !== m.id); broadcast({ type: 'aaDel', id: m.id });
+      if (mode === 'game') setBal(me, bal(me) + E.refund * (COST[g.unit] || 0)); // за снятую группу возвращается часть цены
+      sendRoster(); save();
+    } else if (m.type === 'mode') { // админ переключает режим: у всех очки сбрасываются к стартовым
+      mode = m.mode === 'game' ? 'game' : 'sandbox'; for (const w of wallets.values()) { w.p = E.start; w.at = now(); }
+      broadcast({ type: 'mode', mode }); sendRoster(); save();
     } else if (m.type === 'side') { if (SIDES.includes(m.side) && me.side !== m.side) { me.side = m.side; sendRoster(); } }
     else if (m.type === 'name') { const n = uniqueName(cleanName(m.name, me.name), me); if (n !== me.name) { me.name = n; sendRoster(); } }
     else if (m.type === 'ping') { me.ping = Math.max(0, Math.min(9999, Math.round(Number(m.rtt) || 0))); send(ws, { type: 'pong', t: m.t, now: now() }); }
