@@ -9,7 +9,7 @@ export interface BlastSounds { blastNear?: string; blastFar?: string; debris?: s
 export class Sound {
   private ctx: AudioContext | null = null; private master!: GainNode; private wet!: GainNode;
   private voices: Voice[] = []; private engBuf!: AudioBuffer; private jetBuf!: AudioBuffer; private level = new Map<AudioBuffer, number>(); private boomBuf!: AudioBuffer; private crackBuf!: AudioBuffer; private debrisBuf!: AudioBuffer;
-  private slots: Record<string, AudioBuffer[]> = {};
+  private slots: Record<string, AudioBuffer[]> = {}; private burstBuf: AudioBuffer | null = null;
   volume = 0.7;
   /** Сколько записей загружено — показывается в настройках. */
   get recorded() { return Object.values(this.slots).reduce((n, a) => n + a.length, 0); }
@@ -162,6 +162,23 @@ export class Sound {
     if (dist < 2500) this.play(this.crackBuf, t, 1.5 * att * air * size, 9000, 1 / (0.8 + size * 0.2), 0.3, 500);
     this.play(this.boomBuf, t, 2.2 * Math.sqrt(att) * size, Math.max(90, 2600 * air), 1 / (0.75 + size * 0.25), 0.8);
     if (dist < 1800) this.play(this.debrisBuf, t + 0.35, (collapse ? 0.9 : 0.4) * att, 5000 * air + 400, collapse ? 0.7 : 1, 0.5, 300);
+  }
+
+  /** Очередь крупнокалиберного пулемёта (секунда огня) с задержкой по расстоянию. */
+  gunBurst(dist: number, pan = 0) {
+    const c = this.ctx; if (!c || dist > 7000) return;
+    if (!this.burstBuf) { // десять выстрелов: резкий хлопок и короткий низкий удар, темп чуть неровный
+      const sr = c.sampleRate, b = c.createBuffer(1, Math.floor(sr * 1.15), sr), d = b.getChannelData(0); let lp = 0;
+      for (let k = 0; k < 10; k++) { const at = Math.floor((k * 0.1 + Math.random() * 0.012) * sr), amp = 0.8 + Math.random() * 0.3;
+        for (let i = 0; i < sr * 0.12 && at + i < d.length; i++) { const t = i / sr; lp += ((Math.random() * 2 - 1) - lp) * 0.35; d[at + i] += amp * ((Math.random() * 2 - 1) * Math.exp(-t * 90) + lp * 1.4 * Math.exp(-t * 28) + Math.sin(6.283 * 95 * t) * 0.7 * Math.exp(-t * 35)); } }
+      for (let i = 0; i < d.length; i++) d[i] = Math.tanh(d[i] * 1.2) * 0.8;
+      this.burstBuf = b;
+    }
+    const att = Math.min(1, 120 / Math.max(120, dist)), s = c.createBufferSource(); s.buffer = this.burstBuf; s.playbackRate.value = 0.97 + Math.random() * 0.06;
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(400, 12000 * Math.exp(-dist / 900));
+    const g = c.createGain(); g.gain.value = 0.9 * Math.sqrt(att); const p = c.createStereoPanner(); p.pan.value = Math.max(-0.9, Math.min(0.9, pan));
+    s.connect(lp); lp.connect(g); g.connect(p); p.connect(this.master); const w = c.createGain(); w.gain.value = 0.35; p.connect(w); w.connect(this.wet);
+    s.start(c.currentTime + Math.min(dist / 340, 12));
   }
 
   siren() {

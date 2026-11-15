@@ -125,6 +125,21 @@ export class FX {
   dust(x: number, y: number, z: number, size: number) { const g = 0.4 + Math.random() * 0.12; this.smoke.add(x, y + size * 0.3, z, (Math.random() - 0.5) * 4, 1 + Math.random() * 2, (Math.random() - 0.5) * 4, 3 + Math.random() * 3, size, size * 0.8, g, g * 0.95, g * 0.86, 1.2); }
 
   /** Дым без взрыва — для уже повреждённых зданий при подключении к сессии. */
+  /** Вспышка у ствола. */
+  muzzle(x: number, y: number, z: number, k = 1) { this.fire.add(x, y, z, 0, 0, 0, 0.06, 0.5 * k, 6 * k, 1.4, 1.0, 0.5); }
+  /** Попадание в цель в воздухе: вспышка, искры, клуб дыма. */
+  airHit(x: number, y: number, z: number, k = 1) {
+    const R = Math.random, rnd = () => R() * 2 - 1;
+    this.fire.add(x, y, z, 0, 0, 0, 0.12, 3 * k, 40 * k, 1.6, 1.3, 0.8);
+    for (let i = 0; i < 14; i++) this.fire.add(x, y, z, rnd() * 22, rnd() * 22, rnd() * 22, 0.4 + R() * 0.6, 0.3 * k, 0, 1.0, 0.6, 0.2, 0.6, 9);
+    for (let i = 0; i < 6; i++) { const g = 0.07 + R() * 0.05; this.smoke.add(x + rnd(), y + rnd(), z + rnd(), rnd() * 4, rnd() * 4, rnd() * 4, 2 + R() * 2, 2 * k, 1.5 * k, g, g, g, 1.2); }
+  }
+  /** След падающей сбитой цели: пламя и чёрный дым. */
+  wreckTrail(x: number, y: number, z: number, k = 1) {
+    const R = Math.random, g = 0.04 + R() * 0.04;
+    this.fire.add(x, y, z, (R() - 0.5) * 2, R() * 2, (R() - 0.5) * 2, 0.25 + R() * 0.25, 0.9 * k, 2 * k, 1.0, 0.5 + R() * 0.2, 0.1, 1);
+    this.smoke.add(x, y, z, (R() - 0.5) * 2, 1 + R() * 2, (R() - 0.5) * 2, 3 + R() * 3, 1.2 * k, 1.6 * k, g, g, g, 0.6, -0.3);
+  }
   smolder(x: number, y: number, z: number, tnt: number) { this.emitters.push({ x, y, z, t: 25, dur: 80, s: Math.cbrt(tnt), acc: 0 }); }
 
   update(dt: number) {

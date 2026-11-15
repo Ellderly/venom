@@ -31,6 +31,22 @@ export interface UnitDef {
   sounds: { engineNear?: string; engineFar?: string; blastNear?: string; blastFar?: string; debris?: string }; // слоты из sounds/manifest.json
   card: [string, string][];
   about: string;
+  aa?: AirDefenseDef;   // средство ПВО: ставится на карту стороной обороны
+}
+/** Параметры зенитного средства. Баланс правится здесь. */
+export interface AirDefenseDef {
+  range: number;        // наклонная дальность огня, м
+  rof: number;          // выстрелов в секунду
+  belt: number;         // выстрелов в ленте
+  reloadS: number;      // смена ленты, с
+  aimS: number;         // наведение на новую цель до открытия огня, с
+  pk: number;           // вероятность поражения за секунду огня в упор по медленной цели днём
+  refSpeed: number;     // скорость цели, выше которой попасть труднее (множитель (refSpeed / v)^1.5), м/с
+  nightK: number;       // множитель ночью (прожектор и тепловизор помогают, но хуже, чем днём)
+  placeS: number;       // развёртывание после постановки, с
+  packS: number;        // свёртывание перед переездом, с
+  deployS: number;      // развёртывание после переезда, с
+  max: number;          // сколько таких средств может стоять в мире
 }
 
 export const UNITS: Record<string, UnitDef> = {
@@ -67,6 +83,22 @@ export const UNITS: Record<string, UnitDef> = {
     ],
     about: 'Втрое быстрее «Герани-2» и почти вдвое тяжелее по боевой части: на реакцию остаётся намного меньше времени, а вместо треска мотора — свист и гул турбины. Ночью заметна по свечению сопла. Дороже и запускается реже.',
   },
+};
+
+UNITS.mfg = {
+  id: 'mfg', name: 'Огневая группа', alt: 'пикап с ДШК', kind: 'Мобильная огневая группа ПВО', origin: 'Украина',
+  side: 'defense', cat: 'short', cost: 30, reload: 15,
+  icon: '<path d="M6 30 L6 22 L20 22 L24 14 L38 14 L40 22 L58 22 L58 30 Z" fill="currentColor"/><circle cx="17" cy="31" r="5" fill="currentColor"/><circle cx="47" cy="31" r="5" fill="currentColor"/><path d="M46 20 L50 12 L62 4" stroke="currentColor" stroke-width="2.5" fill="none"/>',
+  speed: 60 / 3.6, cruiseAgl: 0, diveDeg: 0, warheadKg: 0, tntKg: 0, engine: 'piston', sounds: {},
+  aa: { range: 1300, rof: 10, belt: 100, reloadS: 6, aimS: 1.5, pk: 0.06, refSpeed: 55, nightK: 0.65, placeS: 15, packS: 4, deployS: 10, max: 12 },
+  card: [
+    ['Вооружение', 'крупнокалиберный пулемёт 12,7 мм (ДШК / M2 Browning)'], ['Дальность огня по воздушным целям', '≈ 1,3 км'],
+    ['Темп стрельбы', '≈ 600 выстр./мин'], ['Лента', '100 патронов, смена ≈ 6 с'],
+    ['Обнаружение', 'на слух и визуально, ночью — прожектор и тепловизор'],
+    ['Шасси', 'пикап, по городу до 60 км/ч'], ['Развёртывание', '≈ 15 с на новом месте, ≈ 10 с после переезда'],
+    ['В мире одновременно', 'до 12 групп'],
+  ],
+  about: 'Пикап с пулемётом в кузове — самое массовое и дешёвое средство против «Гераней». Одна группа ведёт одну цель: одиночную «Герань-2», идущую прямо над ней, сбивает примерно в двух случаях из трёх, но рой её перегружает, а по реактивной «Герани-5» шансов почти нет. Сбитый дрон падает — и иногда взрывается там, куда упал. Группу можно перегнать на новое место: в дороге она не стреляет.',
 };
 
 export const unitsOf = (side: Side, cat?: string) => Object.values(UNITS).filter(u => u.side === side && (!cat || u.cat === cat));

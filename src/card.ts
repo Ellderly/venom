@@ -21,13 +21,13 @@ export class CardView {
     if (this.model) this.scene.remove(this.model);
     this.model = (this.built[u.id] ??= this.models[u.id]?.() ?? null);
     if (this.model) { // камера подбирается по размеру модели
-      this.scene.add(this.model); const s = new THREE.Box3().setFromObject(this.model).getBoundingSphere(new THREE.Sphere()).radius;
-      this.cam.position.set(0, s * 0.85, s * 2.35); this.cam.lookAt(0, 0, 0);
+      this.scene.add(this.model); const sp = new THREE.Box3().setFromObject(this.model).getBoundingSphere(new THREE.Sphere()), s = sp.radius, cy = sp.center.y;
+      this.cam.position.set(0, cy + s * 0.85, s * 2.35); this.cam.lookAt(0, cy, 0);
     }
     const cat = CATEGORIES.find(c => c.id === u.cat);
     host.innerHTML = `<div class="tag ${u.side === 'attack' ? 'atk' : 'def'}">${SIDE_NAME[u.side]} · ${cat?.name ?? ''}</div>
       <h2>${u.name} <span class="dim" style="font-weight:400">/ ${u.alt}</span></h2><div data-c></div>
-      <div class="stats"><div><b>${Math.round(u.speed * 3.6)}</b>км/ч</div><div><b>${u.tntKg}</b>кг ТНТ</div><div><b>${u.cost}</b>очков</div><div><b>${u.reload} с</b>перезарядка</div></div><div data-a class="row" style="margin-bottom:8px"></div>
+      <div class="stats">${(u.aa ? [[(u.aa.range / 1000).toFixed(1).replace('.', ','), 'км дальность'], [u.aa.max, 'групп в мире'], [u.cost, 'очков'], [u.aa.placeS + ' с', 'развёртывание']] : [[Math.round(u.speed * 3.6), 'км/ч'], [u.tntKg, 'кг ТНТ'], [u.cost, 'очков'], [u.reload + ' с', 'перезарядка']]).map(s => `<div><b>${s[0]}</b>${s[1]}</div>`).join('')}</div><div data-a class="row" style="margin-bottom:8px"></div>
       <p>${u.about}</p><div class="tag">${u.kind}</div>
       <table><tr><td>Происхождение</td><td>${u.origin}</td></tr>${u.card.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('')}</table>
       <p class="note">Данные из открытых источников, приблизительные. Модель построена по реальным габаритам. В песочнице цена и перезарядка не ограничивают запуск.</p>`;

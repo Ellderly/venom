@@ -162,3 +162,30 @@ export function buildGeran5(): THREE.Group {
   const glow = jetGlow(0.085); glow.position.set(0, ny, -2.6); g.add(glow);
   return g;
 }
+
+/** Огневая группа: пикап с крупнокалиберным пулемётом в кузове и прожектором. `mount` поворачивается по курсу, `gun` — по углу места. */
+export function buildPickup(): THREE.Group {
+  const g = new THREE.Group();
+  const paint = new THREE.MeshStandardMaterial({ color: 0x4d5a3c, roughness: 0.75, metalness: 0.15 }), dark = new THREE.MeshStandardMaterial({ color: 0x17181a, roughness: 0.7, metalness: 0.3 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x1c2a33, roughness: 0.2, metalness: 0.6 }), steel = new THREE.MeshStandardMaterial({ color: 0x2c2e30, roughness: 0.5, metalness: 0.7 });
+  const box = (w: number, h: number, d: number, x: number, y: number, z: number, m: THREE.Material, to: THREE.Object3D = g) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); to.add(b); return b; };
+  box(1.85, 0.5, 5.2, 0, 0.75, 0, paint);                          // рама и борта
+  box(1.8, 0.35, 1.5, 0, 1.1, 1.75, paint);                        // капот
+  box(1.75, 0.75, 1.7, 0, 1.4, 0.25, paint);                       // кабина
+  box(1.6, 0.5, 0.06, 0, 1.47, 1.1, glass).rotation.x = -0.35;      // лобовое стекло
+  box(1.77, 0.42, 1.2, 0, 1.47, 0.2, glass);                       // боковые стёкла
+  box(1.85, 0.45, 0.08, 0, 1.2, -2.56, paint);                     // задний борт
+  for (const sx of [-1, 1]) box(0.08, 0.45, 1.9, sx * 0.89, 1.2, -1.6, paint);
+  box(1.9, 0.18, 0.2, 0, 0.62, 2.6, dark); box(1.9, 0.18, 0.2, 0, 0.62, -2.6, dark); // бамперы
+  for (const sx of [-1, 1]) for (const z of [1.65, -1.6]) { const w = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.3, 14), dark); w.rotation.z = Math.PI / 2; w.position.set(sx * 0.85, 0.4, z); g.add(w); }
+  box(0.25, 0.14, 0.2, 0, 1.86, 0.6, steel);                       // прожектор на крыше
+  const mount = new THREE.Group(); mount.name = 'mount'; mount.position.set(0, 1.0, -1.5); g.add(mount);
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 1.0, 8), steel); post.position.y = 0.5; mount.add(post); // тумба
+  const gun = new THREE.Group(); gun.name = 'gun'; gun.position.y = 1.1; mount.add(gun);
+  box(0.16, 0.2, 0.7, 0, 0, 0.05, steel, gun);                     // ствольная коробка
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 1.5, 8), steel); barrel.rotation.x = Math.PI / 2; barrel.position.z = 1.1; gun.add(barrel);
+  box(0.3, 0.22, 0.3, 0.24, -0.02, 0, paint, gun);                 // патронная коробка
+  box(0.5, 0.04, 0.04, 0, 0, -0.45, steel, gun);                   // рукоятки
+  box(0.6, 0.5, 0.03, 0, 0.1, 0.45, paint, gun);                   // щиток
+  return g;
+}

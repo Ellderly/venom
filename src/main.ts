@@ -6,9 +6,10 @@ import { Buildings } from './buildings';
 import { CityCamera } from './camera';
 import { FX } from './fx';
 import { Sound, Heard } from './audio';
-import { buildGeran2, buildGeran5 } from './model';
+import { buildGeran2, buildGeran5, buildPickup } from './model';
+import { AirDefense, GunRec } from './aa';
 import { UNITS, UnitDef, Side, SIDE_NAME, CATEGORIES, unitsOf } from './units';
-import { Launch, State, trajectory, planLaunch } from './sim';
+import { Launch, State, planLaunch, planDown, flightState, endOf } from './sim';
 import { Destruction } from './voxels';
 import { Session, Msg, Player, Worlds, WorldInfo, worldStore, remoteSession } from './net';
 import { PRESETS, loadQualityName } from './quality';
@@ -32,18 +33,19 @@ renderer.info.autoReset = false; // кадр состоит из несколь�
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace; // свои шейдеры сами переводят цвет в sRGB
 const scene = new THREE.Scene();
 const map = new MapData(), sound = new Sound(); sound.volume = S.volume;
+let aa: AirDefense;
 let env: Env, ground: Ground, buildings: Buildings, cc: CityCamera, fx: FX, destr: Destruction, tac: TacMap, mini: Minimap, trees: Trees, bridges: Bridges, landmarks: Landmarks;
 let shadows: Shadows | null = null, post: Post | null = null;
 let session: Session | null = null, worlds: Worlds;
 let players: Player[] = [];
 let dyn = 1; // динамическое разрешение
 
-interface Drone { L: Launch; mesh: THREE.Group; prop: THREE.Object3D | null; glow: THREE.Object3D | null; label: HTMLElement; row: HTMLElement; s: State; eta: number }
+interface Drone { L: Launch; mesh: THREE.Group; prop: THREE.Object3D | null; glow: THREE.Object3D | null; label: HTMLElement; row: HTMLElement; s: State; eta: number; spin: number }
 const drones = new Map<number, Drone>();
 const hits: { x: number; z: number }[] = [];
 /** Модели юнитов: по одной заготовке на тип, в игру идут копии. */
-const protos: Record<string, THREE.Group> = { geran2: buildGeran2(), geran5: buildGeran5() };
-const builders: Record<string, () => THREE.Group> = { geran2: buildGeran2, geran5: buildGeran5 };
+const protos: Record<string, THREE.Group> = { geran2: buildGeran2(), geran5: buildGeran5(), mfg: buildPickup() };
+const builders: Record<string, () => THREE.Group> = { geran2: buildGeran2, geran5: buildGeran5, mfg: buildPickup };
 const cards = new CardView(builders); // карточке — своя копия модели: у неё другой рендерер и обычный вывод цвета
 // Сцена выводит цвет без преобразования (свои шейдеры отдают готовый sRGB) — стандартным материалам моделей добавляем его сами, иначе они почти чёрные.
 for (const p of Object.values(protos)) p.traverse(o => {
@@ -71,13 +73,17 @@ marker.visible = aimLine.visible = false; marker.renderOrder = aimLine.renderOrd
 
 function arm(u: UnitDef | null) {
   if (u && mySide() !== u.side) { feed(`«${u.name}» доступна стороне «${SIDE_NAME[u.side]}». Смените сторону: ${keyName(S.keys.side)}`, 'sys'); u = null; }
-  launchUI.armed = u; launchUI.step = 0; marker.visible = aimLine.visible = false;
-  $('launch').classList.toggle('hidden', !u); canvas.classList.toggle('aim', !!u);
+  launchUI.armed = u; launchUI.step = 0; marker.visible = aimLine.visible = false; if (u) selectGun(0, true);
+  $('launch').classList.toggle('hidden', !u && !aaUI.sel); canvas.classList.toggle('aim', !!u || aaUI.move);
   document.querySelectorAll('[data-unit]').forEach(e => e.classList.toggle('on', !!u && (e as HTMLElement).dataset.unit === u.id));
   renderLaunch(); renderTacUnits();
 }
 function renderLaunch() {
-  const u = launchUI.armed; if (!u) return;
+  const u = launchUI.armed, isAA = !!u?.aa || (!u && !!aaUI.sel);
+  for (const id of ['modesRow', 'counts', 'countsLbl', 'launchNote']) $(id).classList.toggle('hidden', isAA);
+  $('aaRow').classList.toggle('hidden', !isAA); if (isAA) $('mixRow').classList.add('hidden');
+  if (isAA) { renderAA(); return; }
+  if (!u) return;
   $('step').innerHTML = launchUI.step === 0 ? `<b>Шаг 1.</b> Кликните по цели в городе — туда ударит ${u.name}`
     : launchUI.mode === 0 ? '<b>Шаг 2.</b> Кликните точку, откуда прилетит цель' : '<b>Шаг 2.</b> Кликните, с какой стороны прилетит цель';
   $('modes').innerHTML = ''; for (const [m, n] of MODES) { const b = el('button', m === launchUI.mode ? 'on' : ''); b.textContent = n; b.onclick = () => { launchUI.mode = m; renderLaunch(); }; $('modes').append(b); }
@@ -94,7 +100,17 @@ function renderLaunch() {
 /** Клик по точке мира — из 3D-вида или с тактической карты. */
 function clickWorld(x: number, z: number) {
   sound.unlock();
-  const u = launchUI.armed; if (!u || !session) return false;
+  if (!session) return false;
+  if (aaUI.sel && aaUI.move) { // приказ на переезд выбранной группы
+    const p = aa.posOf(aaUI.sel); if (!p || !canStand(x, z)) return true;
+    session.send({ type: 'aaMove', id: aaUI.sel, x0: p.x, z0: p.z, x, z }); aaUI.move = false; canvas.classList.remove('aim'); renderLaunch(); return true;
+  }
+  const u = launchUI.armed; if (!u) return false;
+  if (u.aa) { // постановка огневой группы
+    if (aa.count >= u.aa.max) { feed(`Больше ${u.aa.max} групп поставить нельзя — снимите или перегоните имеющиеся`, 'sys'); return true; }
+    if (canStand(x, z)) session.send({ type: 'aaPlace', unit: u.id, x, z });
+    return true;
+  }
   if (launchUI.step === 0) { launchUI.tx = x; launchUI.tz = z; launchUI.step = 1; marker.position.set(x, map.heightAt(x, z) + 1, z); marker.visible = true; renderLaunch(); return true; }
   let dx = x - launchUI.tx, dz = z - launchUI.tz; const d = Math.hypot(dx, dz); if (d < 30) return true; dx /= d; dz /= d;
   const types = launchUI.count > 1 ? swarm(u) : [u];
@@ -122,6 +138,50 @@ function setGlow(night: number) {
   });
 }
 
+// ---------- ПВО: постановка, выбор и переезд огневых групп ----------
+const aaUI = { sel: 0, move: false };
+const gunLabels = new Map<number, HTMLElement>();
+function canStand(x: number, z: number) {
+  const m = map.meta;
+  if (x < m.x0 || x > m.x1 || z < m.z0 || z > m.z1) { feed('За краем карты группу поставить нельзя', 'sys'); return false; }
+  if (map.buildingAt(x, z) >= 0) { feed('Здесь здание — выберите улицу, двор или пустырь', 'sys'); return false; }
+  return true;
+}
+function selectGun(id: number, quiet = false) {
+  aaUI.sel = id; aaUI.move = false; aa.selected = id; canvas.classList.toggle('aim', !!launchUI.armed);
+  if (id && launchUI.armed) { arm(null); return; } // arm(null) сам обновит панель
+  if (!quiet) { $('launch').classList.toggle('hidden', !id && !launchUI.armed); renderLaunch(); }
+}
+/** Панель ПВО: постановка новой группы или приказы выбранной. */
+function renderAA() {
+  const u = launchUI.armed, row = $('aaRow'); row.innerHTML = '';
+  const btn = (text: string, fn: () => void, on = false) => { const b = el('button', on ? 'on' : ''); b.textContent = text; b.onclick = fn; row.append(b); };
+  if (u?.aa) {
+    $('step').innerHTML = `<b>${u.name}.</b> Кликните по карте — туда встанет группа. Стоит: ${aa.count} из ${u.aa.max}. Развёртывание ${u.aa.placeS} с, дальность огня ${(u.aa.range / 1000).toFixed(1).replace('.', ',')} км.`;
+  } else {
+    const g = aa.views().find(v => v.id === aaUI.sel); if (!g) { selectGun(0); return; }
+    $('step').innerHTML = aaUI.move ? `<b>Группа №${g.id}.</b> Кликните, куда её перегнать. В дороге она не стреляет.`
+      : `<b>Группа №${g.id}</b> <span class="dim">(${esc(g.by)})</span> — ${g.moving ? 'в пути' : g.ready ? 'готова к бою' : 'развёртывается, ещё ' + fmt(g.wait)}`;
+    btn('Перегнать', () => { aaUI.move = !aaUI.move; canvas.classList.toggle('aim', aaUI.move); renderLaunch(); }, aaUI.move);
+    btn('Показать', () => cc.flyTo(g.x, g.z, Math.min(cc.dist, 900)));
+    btn('Снять', () => { session?.send({ type: 'aaDel', id: g.id }); selectGun(0); });
+  }
+  $('tacHint').innerHTML = $('step').innerHTML;
+}
+/** Метки групп на экране — только стороне обороны. */
+function gunLabelsUpdate() {
+  const show = mySide() === 'defense', views = show ? aa.views() : [];
+  for (const [id, e] of gunLabels) if (!views.some(v => v.id === id)) { e.remove(); gunLabels.delete(id); }
+  for (const g of views) {
+    let e = gunLabels.get(g.id); if (!e) { e = el('div', 'lbl gun'); e.onclick = () => selectGun(aaUI.sel === g.id ? 0 : g.id); $('labels').append(e); gunLabels.set(g.id, e); }
+    v3.set(g.x, g.y + 6, g.z).project(cc.cam); const off = v3.z > 1 || Math.abs(v3.x) > 1 || Math.abs(v3.y) > 1;
+    e.style.display = off ? 'none' : ''; if (off) continue;
+    e.style.left = `${(v3.x + 1) / 2 * innerWidth}px`; e.style.top = `${(1 - v3.y) / 2 * innerHeight}px`;
+    e.textContent = `ОГ №${g.id}` + (g.moving ? ' · в пути' : !g.ready ? ` · ${fmt(g.wait)}` : g.firing ? ' · огонь' : g.reload > 0 ? ' · лента' : '');
+    e.classList.toggle('sel', g.id === aaUI.sel);
+  }
+}
+
 // ---------- события сессии ----------
 function feed(t: string, cls = '') { const d = el('div', cls); d.textContent = t; $('feed').append(d); setTimeout(() => d.remove(), 9000); while ($('feed').children.length > 6) $('feed').firstChild!.remove(); }
 
@@ -131,11 +191,12 @@ function addDrone(L: Launch) {
   if (!u || !protos[L.unit] || ![L.sx, L.sz, L.tx, L.tz, L.t0].every(Number.isFinite)) return; // чужие данные по сети не должны ломать игру
   L = { ...L };
   if (L.impactT === undefined) planLaunch(L, map);
-  if (session!.now() >= L.t0 + L.impactT) { impact(L, true); return; } // подключились позже — попадание уже было
+  if (L.down) planDown(L, map, L.down.t, L.down.gun); // по сети приходит только момент поражения — падение считаем сами
+  if (session!.now() >= L.t0 + endOf(L).t) { impact(L, true); return; } // подключились позже — попадание уже было
   const mesh = protos[L.unit].clone(); scene.add(mesh);
   const label = el('div', 'lbl'); $('labels').append(label);
   const row = el('div', 'it'); row.dataset.type = L.unit; $('tgList').append(row);
-  const d: Drone = { L, mesh, prop: mesh.getObjectByName('prop') ?? null, glow: mesh.getObjectByName('glow') ?? null, label, row, s: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 }, eta: L.impactT };
+  const d: Drone = { L, mesh, prop: mesh.getObjectByName('prop') ?? null, glow: mesh.getObjectByName('glow') ?? null, label, row, s: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 }, eta: L.impactT, spin: 0 };
   label.onclick = row.onclick = () => follow(d);
   drones.set(L.id, d); $('targets').classList.remove('hidden');
   if (mySide() === 'defense') feed(`Воздушная тревога: ${u.name}, подлёт через ${fmt(L.impactT)}`, 'def');
@@ -144,17 +205,19 @@ function addDrone(L: Launch) {
 }
 
 function impact(L: Launch, silent = false) {
-  const u = UNITS[L.unit];
-  const rad = 1.6 * Math.cbrt(u.tntKg), [hit, fell] = destr.blast(L.ix, L.iy, L.iz, rad, b => buildings.hide(b)), br = bridges.blast(L.ix, L.iy, L.iz, rad);
-  const onGround = !hit && !br && L.iy - map.heightAt(L.ix, L.iz) < 2;
-  hits.push({ x: L.ix, z: L.iz });
-  if (silent) { fx.smolder(L.ix, L.iy, L.iz, u.tntKg); if (onGround) fx.scorch(L.ix, L.iy, L.iz, Math.cbrt(u.tntKg) * 3.6); return; }
-  fx.explode(L.ix, L.iy, L.iz, u.tntKg, onGround);
-  const dist = cc.cam.position.distanceTo(new THREE.Vector3(L.ix, L.iy, L.iz));
-  sound.explosion(dist, u.tntKg, fell > 40, u.sounds); cc.shake = Math.max(cc.shake, Math.min(6, 900 / Math.max(60, dist)));
-  const lm = map.obstacles.find(o => (L.ix - o.x) ** 2 + (L.iz - o.z) ** 2 < (o.r + 3) ** 2 && L.iy < o.top + 3);
-  feed(lm && !hit ? `Попадание: ${u.name} — ${lm.name}` : br ? `Попадание: ${u.name} — пролёт моста обрушен` : hit ? `Попадание: ${u.name} — повреждено зданий: ${hit}` + (fell > 40 ? ', часть конструкций обрушилась' : '') : `Попадание: ${u.name} — открытая местность`);
-  if (session && L.pid === session.me) session.send({ type: 'hit', id: L.id, buildings: hit });
+  const u = UNITS[L.unit], e = endOf(L), dn = L.down;
+  const tnt = dn ? (dn.det ? u.tntKg : 8) : u.tntKg; // сбитый дрон: боевая часть срабатывает не всегда, иначе — только удар и пожар от топлива
+  const rad = 1.6 * Math.cbrt(tnt), [hit, fell] = destr.blast(e.x, e.y, e.z, rad, b => buildings.hide(b)), br = bridges.blast(e.x, e.y, e.z, rad);
+  const onGround = !hit && !br && e.y - map.heightAt(e.x, e.z) < 2;
+  hits.push({ x: e.x, z: e.z });
+  if (silent) { fx.smolder(e.x, e.y, e.z, tnt); if (onGround) fx.scorch(e.x, e.y, e.z, Math.cbrt(tnt) * 3.6); return; }
+  fx.explode(e.x, e.y, e.z, tnt, onGround);
+  const dist = cc.cam.position.distanceTo(new THREE.Vector3(e.x, e.y, e.z));
+  sound.explosion(dist, tnt, fell > 40, u.sounds); cc.shake = Math.max(cc.shake, Math.min(6, 900 / Math.max(60, dist)) * Math.min(1, tnt / 40));
+  const lm = map.obstacles.find(o => (e.x - o.x) ** 2 + (e.z - o.z) ** 2 < (o.r + 3) ** 2 && e.y < o.top + 3);
+  const where = lm && !hit ? lm.name : br ? 'пролёт моста обрушен' : hit ? `повреждено зданий: ${hit}` + (fell > 40 ? ', часть конструкций обрушилась' : '') : 'открытая местность';
+  feed(dn ? `Сбитая ${u.name} упала${dn.det ? ' и взорвалась' : ''} — ${where}` : `Попадание: ${u.name} — ${where}`);
+  if (session && L.pid === session.me && !dn) session.send({ type: 'hit', id: L.id, buildings: hit });
 }
 
 function removeDrone(d: Drone) { scene.remove(d.mesh); d.label.remove(); d.row.remove(); drones.delete(d.L.id); if (!drones.size) $('targets').classList.add('hidden'); }
@@ -176,12 +239,28 @@ function setPlayers(list: Player[], quiet = false) {
 }
 
 function onMsg(m: Msg) {
-  if (m.type === 'welcome') { if (m.env) { env.hour = m.env.hour; env.speed = m.env.speed; } setPlayers(m.players, true); m.launches.forEach(addDrone); if (m.launches.length) feed(`Мир загружен: попаданий ${m.launches.length}`, 'sys'); }
+  if (m.type === 'welcome') { if (m.env) { env.hour = m.env.hour; env.speed = m.env.speed; } setPlayers(m.players, true); aa.clear(); (m.guns ?? []).forEach(g => aa.upsert(g)); m.launches.forEach(addDrone); if (m.launches.length) feed(`Мир загружен: попаданий ${m.launches.length}`, 'sys'); }
   else if (m.type === 'launch') addDrone(m.launch);
+  else if (m.type === 'down') onDown(m.id, m.t, m.gun);
+  else if (m.type === 'aa') onGun(m.gun);
+  else if (m.type === 'aaDel') { aa.remove(m.id); if (aaUI.sel === m.id) selectGun(0); else if (launchUI.armed?.aa) renderLaunch(); if (mySide() === 'defense') feed(`Огневая группа №${m.id} снята`, 'sys'); }
   else if (m.type === 'env') { env.hour = m.hour; env.speed = m.speed; }
   else if (m.type === 'reset') { resetDamage(); feed('Разрушения сброшены', 'sys'); }
   else if (m.type === 'players') setPlayers(m.players);
   else if (m.type === 'closed') { const r = m.reason; toMenu(); modal(`<h2>Сессия завершена</h2><p>${esc(r)}</p><button data-close>Понятно</button>`); }
+}
+
+/** Цель сбита: с этого момента она падает. */
+function onDown(id: number, t: number, gun: number) {
+  const d = drones.get(id); if (!d || d.L.down || !Number.isFinite(t)) return; // уже долетела или уже сбита
+  planDown(d.L, map, t, gun); const u = UNITS[d.L.unit];
+  fx.airHit(d.s.x, d.s.y, d.s.z, d.mesh.scale.x); if (d.glow) d.glow.visible = false;
+  feed(`Сбита: ${u.name} №${id}` + (gun ? ` — огневая группа №${gun}` : ''), 'def');
+}
+function onGun(g: GunRec) {
+  const isNew = !aa.posOf(g.id); aa.upsert(g);
+  if (mySide() === 'defense') feed(isNew ? `Огневая группа №${g.id} встала на позицию (${g.by})` : `Огневая группа №${g.id} получила приказ на переезд`, 'def');
+  if (launchUI.armed?.aa || aaUI.sel) renderLaunch();
 }
 
 function start(s: Session) {
@@ -190,7 +269,7 @@ function start(s: Session) {
   applySide(); pickSide(true);
 }
 function toMenu() {
-  session?.close(); session = null; players = []; arm(null); showCard(null); tac.show(false); resetDamage();
+  session?.close(); session = null; players = []; arm(null); selectGun(0); showCard(null); tac.show(false); resetDamage(); aa.clear(); gunLabelsUpdate();
   while (topModal()) (topModal() as any)._close(); sideModal = null;
   $('hud').classList.add('hidden'); $('score').classList.add('hidden'); $('menu').classList.remove('hidden'); menuScreen('mMain'); syncLock();
 }
@@ -222,6 +301,8 @@ function applySide() {
   b.className = s ?? ''; b.textContent = s ? SIDE_NAME[s] : 'Сторона не выбрана';
   document.documentElement.style.setProperty('--acc', s === 'defense' ? 'var(--def)' : 'var(--atk)');
   if (launchUI.armed && launchUI.armed.side !== s) arm(null);
+  if (s !== 'defense') selectGun(0);
+  aa.showRings = s === 'defense';
   if (cards.host === $('card')) showCard(null);
   renderArsenal(); renderQuick(); renderTacUnits();
   if (s && session) feed(`Вы играете за сторону «${SIDE_NAME[s]}»`, s === 'defense' ? 'def' : '');
@@ -254,7 +335,6 @@ function renderArsenal() {
     box.append(grid); body.append(box);
   }
   if (q && !shown) body.append(el('div', 'soon', 'Ничего не найдено'));
-  if (side === 'defense') body.prepend(el('div', 'note', 'Оборона пока наблюдает: цели видны в списке справа и на карте. Перетаскивать на быструю панель можно будет, когда появятся средства ПВО.'));
 }
 function renderQuick() {
   const side = mySide(), bar = $('quick'); bar.innerHTML = ''; bar.classList.toggle('hidden', !side); if (!side) return;
@@ -292,11 +372,11 @@ function renderScore() {
   const grp = (side: Side | null, title: string, cls: string) => {
     const list = players.filter(p => p.side === side); if (!list.length && side === null) return '';
     return `<tr class="grp"><td colspan="5" class="${cls}">${title} · ${list.length}</td></tr>` + (list.length ? list.map(p =>
-      `<tr class="${p.id === session?.me ? 'me' : ''}"><td>${esc(p.name)}${p.id === session?.me ? ' <span class="dim">(вы)</span>' : ''}</td><td class="n">${p.launches}</td><td class="n">${p.hits}</td><td class="n">${session?.online ? p.ping + ' мс' : '—'}</td></tr>`).join('')
+      `<tr class="${p.id === session?.me ? 'me' : ''}"><td>${esc(p.name)}${p.id === session?.me ? ' <span class="dim">(вы)</span>' : ''}</td><td class="n">${p.launches}</td><td class="n">${p.hits}</td><td class="n">${p.downs ?? 0}</td><td class="n">${session?.online ? p.ping + ' мс' : '—'}</td></tr>`).join('')
       : '<tr><td colspan="5" class="dim">никого</td></tr>');
   };
   $('scoreBody').innerHTML = `<div class="row"><h2 style="margin:0">${esc(session?.world ?? '')}</h2><span class="sp"></span><span class="dim">${session?.online ? `адрес: ${esc(session.addr)} · игроков: ${players.length}` : 'игра без сети'}</span></div>
-    <table><tr><th>Игрок</th><th class="n">Запусков</th><th class="n">Поражено зданий</th><th class="n">Пинг</th></tr>
+    <table><tr><th>Игрок</th><th class="n">Запусков</th><th class="n">Поражено зданий</th><th class="n">Сбито</th><th class="n">Пинг</th></tr>
     ${grp('attack', 'Атака', 'atk')}${grp('defense', 'Оборона', 'def')}${grp(null, 'Выбирают сторону', 'dim')}</table>`;
 }
 function showScore(on: boolean) { $('score').classList.toggle('hidden', !on); if (on) renderScore(); }
@@ -402,6 +482,7 @@ window.addEventListener('keydown', e => {
     if (!session) { menuScreen('mMain'); return; }
     if (!$('card').classList.contains('hidden')) { showCard(null); return; }
     if (launchUI.armed) { arm(null); return; }
+    if (aaUI.sel) { selectGun(0); return; }
     showPause(); return;
   }
   if (inInput || !session) return;
@@ -420,13 +501,13 @@ window.addEventListener('blur', () => showScore(false));
 
 // ---------- главный цикл ----------
 const v3 = new THREE.Vector3(), fwd = new THREE.Vector3(), heard: Heard[] = [];
-const tacData: TacData = { drones: [], hits, cam: { x: 0, z: 0, yaw: 0, dist: 0 }, aim: null, cursor: null };
+const tacData: TacData = { drones: [], hits, cam: { x: 0, z: 0, yaw: 0, dist: 0 }, aim: null, cursor: null, guns: [] };
 let last = performance.now(), fpsAcc = 0, fpsN = 0, fpsT = 0, frameNo = 0;
 function frame(nowMs: number) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (nowMs - last) / 1000); last = nowMs; frameNo++;
   U.uTime.value += dt;
-  if (session) { const now = session.now(); for (const d of drones.values()) { trajectory(d.L, map, Math.max(0, Math.min(now - d.L.t0, d.L.impactT)), d.s); d.mesh.position.set(d.s.x, d.s.y, d.s.z); } } // цели — до камеры: слежение без отставания на кадр
+  if (session) { const now = session.now(); for (const d of drones.values()) { flightState(d.L, map, Math.max(0, Math.min(now - d.L.t0, endOf(d.L).t)), d.s); d.mesh.position.set(d.s.x, d.s.y, d.s.z); } } // цели — до камеры: слежение без отставания на кадр
   cc.update(dt); const t = cc.target;
   env.update(dt, scene, cc.cam);
   U.uFogD.value = 1 / Math.max(45000, t.dist * 3.2);
@@ -436,21 +517,23 @@ function frame(nowMs: number) {
     const now = session.now(), filter = $<HTMLSelectElement>('tgFilter').value;
     for (const d of [...drones.values()]) {
       const tt = now - d.L.t0, u = UNITS[d.L.unit];
-      if (tt >= d.L.impactT) { removeDrone(d); impact(d.L); continue; }
-      d.eta = d.L.impactT - tt; fwd.set(d.s.vx, d.s.vy, d.s.vz);
-      d.mesh.lookAt(v3.copy(d.mesh.position).add(fwd)); if (d.prop) d.prop.rotation.z += dt * 90;
+      const endT = endOf(d.L).t, fall = !!d.L.down && tt >= d.L.down.t;
+      if (tt >= endT) { removeDrone(d); impact(d.L); continue; }
+      d.eta = endT - tt; fwd.set(d.s.vx, d.s.vy, d.s.vz);
+      d.mesh.lookAt(v3.copy(d.mesh.position).add(fwd)); if (d.prop && !fall) d.prop.rotation.z += dt * 90;
+      if (fall) { d.spin += dt * 4; d.mesh.rotateZ(d.spin); if (Math.random() < dt * 40) fx.wreckTrail(d.s.x, d.s.y, d.s.z, d.mesh.scale.x); } // сбитая цель кувыркается и горит
       if (d.glow) d.glow.scale.set(1, 1, 0.85 + 0.3 * Math.random()); // факел дрожит
       const dist = cc.cam.position.distanceTo(d.mesh.position);
       d.mesh.scale.setScalar(Math.max(1, dist / 260)); // издалека модель увеличивается, чтобы цель оставалась видимой
       const closing = -fwd.dot(v3.copy(d.mesh.position).sub(cc.cam.position).normalize());
       v3.copy(d.mesh.position).project(cc.cam);
-      heard.push({ dist, closing, pan: v3.z > 1 ? -v3.x : v3.x, dive: Math.min(1, Math.max(0, 1 - d.eta / 3.5)), seed: d.L.seed, near: u.sounds.engineNear, far: u.sounds.engineFar, engine: u.engine });
+      if (!fall) heard.push({ dist, closing, pan: v3.z > 1 ? -v3.x : v3.x, dive: Math.min(1, Math.max(0, 1 - d.eta / 3.5)), seed: d.L.seed, near: u.sounds.engineNear, far: u.sounds.engineFar, engine: u.engine });
       // метка всегда на экране: если цель вне кадра, прижимается к краю
       if (v3.z > 1) { v3.x = -v3.x; v3.y = -v3.y; }
       const off = v3.z > 1 || Math.abs(v3.x) > 0.94 || v3.y > 0.8 || v3.y < -0.94;
       if (off) { const k = Math.max(Math.abs(v3.x) / 0.94, v3.y > 0 ? v3.y / 0.8 : -v3.y / 0.94, 1e-6); v3.x /= k; v3.y /= k; }
       d.label.style.left = `${(v3.x + 1) / 2 * innerWidth}px`; d.label.style.top = `${(1 - v3.y) / 2 * innerHeight}px`; d.label.style.opacity = off ? '0.7' : '1';
-      const eta = fmt(d.eta); d.label.textContent = `${u.name} ${eta}`;
+      const eta = fall ? 'сбита' : fmt(d.eta); d.label.textContent = `${u.name} ${eta}`; d.label.classList.toggle('down', fall);
       if (frameNo % 6 === 0) { d.row.innerHTML = `<span>${u.name} №${d.L.id} <small>${esc(d.L.by)}</small></span><b>${eta}</b>`; d.row.classList.toggle('hidden', !!filter && filter !== d.L.unit); }
       tacData.drones.push({ x: d.s.x, z: d.s.z, sx: d.L.sx, sz: d.L.sz, tx: d.L.tx, tz: d.L.tz, hdg: Math.atan2(d.s.vx, -d.s.vz), label: eta });
     }
@@ -461,12 +544,19 @@ function frame(nowMs: number) {
     if (frameNo % 6 === 0) $('tgCount').textContent = String(drones.size);
   }
   sound.engines(heard); setGlow(U.uNight.value);
+  if (session) { // ПВО: ведущий клиент (первый из подключённых) решает, какие цели сбиты
+    const lead = players.length > 0 && session.me === Math.min(...players.map(p => p.id));
+    aa.update(dt, session.now(), drones, U.uNight.value, cc.cam, lead, (id, tk, gun) => session?.send({ type: 'down', id, t: tk, gun }),
+      (x, y, z) => { v3.set(x, y, z); const dist = cc.cam.position.distanceTo(v3); v3.project(cc.cam); sound.gunBurst(dist, v3.z > 1 ? -v3.x : v3.x); });
+    gunLabelsUpdate(); if (aaUI.sel && frameNo % 20 === 0 && !aaUI.move) renderAA();
+  }
   if (marker.visible) marker.scale.setScalar(Math.max(12, t.dist * 0.018) * (1 + 0.08 * Math.sin(nowMs / 150)));
   destr.update(dt); landmarks.update(dt); fx.update(dt); fx.lights(t.x, t.y, t.z);
   if (!tac.open) { renderer.info.reset(); shadows?.render(renderer, t); if (post) post.render(scene, cc.cam); else renderer.render(scene, cc.cam); }
   cards.render(dt, nowMs);
   if (session && (tac.open || (S.minimap && frameNo % 6 === 0))) {
     const u = launchUI.armed; tacData.cam.x = t.x; tacData.cam.z = t.z; tacData.cam.yaw = cc.yawNow; tacData.cam.dist = t.dist; tacData.cursor = tac.cursor;
+    tacData.guns.length = 0; if (mySide() === 'defense') for (const g of aa.views()) tacData.guns.push({ x: g.x, z: g.z, r: g.r, ready: g.ready, sel: g.id === aaUI.sel, label: `№${g.id}` });
     tacData.aim = u && launchUI.step === 1 ? { tx: launchUI.tx, tz: launchUI.tz, rings: launchUI.mode ? [{ r: launchUI.mode * u.speed, label: `точка появления · ${fmt(launchUI.mode)}` }] : [15, 60, 180].map(s => ({ r: s * u.speed, label: fmt(s) })) } : null;
     if (tac.open) { tac.draw(tacData); $('tacInfo').textContent = `· целей в воздухе: ${drones.size} · попаданий: ${hits.length}`; } else mini.draw(tacData);
   }
@@ -493,7 +583,8 @@ async function boot() {
   landmarks = new Landmarks(map); // до зданий: убирает дома OSM под моделями
   buildings = new Buildings(map, Q); fx = new FX(Q.particles); destr = new Destruction(map, buildings.mat, fx, Q.voxel, Q.debris);
   trees = new Trees(map, Q); bridges = new Bridges(map, fx, destr);
-  scene.add(ground.group, buildings.group, landmarks.group, bridges.group, trees.group, destr.group, trees.lampGroup, fx.group, marker, aimLine);
+  aa = new AirDefense(map, fx, unit => protos[unit]?.clone() ?? null);
+  scene.add(ground.group, buildings.group, landmarks.group, bridges.group, trees.group, destr.group, trees.lampGroup, fx.group, aa.group, marker, aimLine);
   if (Q.shadow) { shadows = new Shadows(Q.shadow); shadows.casters.push(buildings.group, landmarks.group, bridges.group, trees.group, destr.group); }
   if (usePost) post = new Post(renderer, Q.msaa, Q.bloom);
   tac = new TacMap($('tac'), ground.overview, map.meta, landmarks.marks, (x, z) => { if (!clickWorld(x, z)) { cc.flyTo(x, z); toggleTac(false); } });
@@ -506,10 +597,10 @@ async function boot() {
   $('loading').classList.add('hidden'); $('menu').classList.remove('hidden');
   $('btnMenu').onclick = showPause; $('btnMap').onclick = () => toggleTac(); $('tacClose').onclick = () => toggleTac(false);
   $('btnPlayers').onclick = () => showScore($('score').classList.contains('hidden')); $('sideBadge').onclick = () => pickSide();
-  $('btnCancel').onclick = () => arm(null); $('arMin').onclick = () => $('arsenal').classList.toggle('min');
+  $('btnCancel').onclick = () => { arm(null); selectGun(0); }; $('arMin').onclick = () => $('arsenal').classList.toggle('min');
   $<HTMLInputElement>('arSearch').oninput = renderArsenal;
   syncLock();
-  (window as any).venom = { U, map, cc, env, drones, buildings, ground, fx, destr, trees, bridges, landmarks, arm, clickWorld, UNITS, S, scene, renderer, get session() { return session; }, get players() { return players; } };
+  (window as any).venom = { U, map, cc, env, drones, aa, buildings, ground, fx, destr, trees, bridges, landmarks, arm, clickWorld, UNITS, S, scene, renderer, get session() { return session; }, get players() { return players; } };
   requestAnimationFrame(frame);
 }
 boot().catch(e => { $('loadText').textContent = 'Ошибка загрузки: ' + (e?.message ?? e); console.error(e); });

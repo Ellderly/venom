@@ -1,17 +1,24 @@
 // Сессия: локальная (всё в браузере) или сетевая (сервер рассылает события всем игрокам). Плюс список миров.
 import { Launch } from './sim';
+import { GunRec } from './aa';
+import { UNITS } from './units';
 import { Side } from './units';
 
-export interface Player { id: number; name: string; side: Side | null; launches: number; hits: number; ping: number }
+export interface Player { id: number; name: string; side: Side | null; launches: number; hits: number; downs: number; ping: number }
 
 export type Msg =
-  | { type: 'welcome'; you: number; now: number; world: string; players: Player[]; launches: Launch[]; env?: { hour: number; speed: number } }
+  | { type: 'welcome'; you: number; now: number; world: string; players: Player[]; launches: Launch[]; guns?: GunRec[]; env?: { hour: number; speed: number } }
   | { type: 'players'; players: Player[] }
   | { type: 'hello'; name: string; side: Side | null }
   | { type: 'side'; side: Side }
   | { type: 'name'; name: string }
   | { type: 'launch'; launch: Launch }
   | { type: 'hit'; id: number; buildings: number }
+  | { type: 'down'; id: number; t: number; gun: number }                       // цель сбита (решает ведущий клиент)
+  | { type: 'aaPlace'; unit: string; x: number; z: number }                    // поставить огневую группу
+  | { type: 'aaMove'; id: number; x0: number; z0: number; x: number; z: number } // перегнать: откуда (где она сейчас) и куда
+  | { type: 'aa'; gun: GunRec }                                                // группа поставлена или получила приказ
+  | { type: 'aaDel'; id: number }
   | { type: 'ping'; t: number; rtt: number }
   | { type: 'pong'; t: number; now: number }
   | { type: 'env'; hour: number; speed: number }
@@ -64,17 +71,31 @@ function localWorlds(): Worlds {
 function localSession(w: WorldInfo, name: string, touch: (id: string, hits: number) => void): Session {
   let handler: (m: Msg) => void = () => {};
   let log = read<Launch[]>(wkey(w.id), []), nextId = log.reduce((m, L) => Math.max(m, (L.id || 0) + 1), 1);
-  const me: Player = { id: 1, name: name || 'Игрок', side: null, launches: 0, hits: 0, ping: 0 };
-  const persist = () => { write(wkey(w.id), log); touch(w.id, log.length); };
+  const me: Player = { id: 1, name: name || 'Игрок', side: null, launches: 0, hits: 0, downs: 0, ping: 0 };
+  let guns = read<GunRec[]>(wkey(w.id) + '.aa', []).map(g => ({ ...g, x0: g.x, z0: g.z, t: -1e7 })), nextGun = guns.reduce((m, g) => Math.max(m, g.id + 1), 1);
+  const saveGuns = () => write(wkey(w.id) + '.aa', guns);
+  const persist = () => { write(wkey(w.id), log.map(L => L.down ? { ...L, down: { t: L.down.t, gun: L.down.gun } } : L)); touch(w.id, log.length); };
   const roster = () => queueMicrotask(() => handler({ type: 'players', players: [{ ...me }] }));
   const s: Session = { online: false, me: 1, world: w.name, addr: '', now: () => performance.now() / 1000, close: () => {},
-    listen: h => { handler = h; h({ type: 'welcome', you: 1, now: s.now(), world: w.name, players: [{ ...me }], launches: log.map(L => ({ ...L, t0: -1e7 })) }); },
+    listen: h => { handler = h; h({ type: 'welcome', you: 1, now: s.now(), world: w.name, players: [{ ...me }], launches: log.map(L => ({ ...L, t0: -1e7 })), guns }); },
     send(m) {
       if (m.type === 'launch') { if (me.side !== 'attack') return; const L = m.launch; L.id = nextId++; L.by = me.name; L.pid = 1; L.t0 = s.now(); log.push({ ...L }); me.launches++; persist(); roster(); }
       else if (m.type === 'hit') { me.hits += m.buildings; roster(); return; }
+      else if (m.type === 'down') { const L = log.find(x => x.id === m.id); if (!L || L.down) return; L.down = { t: m.t, gun: m.gun } as Launch['down']; me.downs++; persist(); roster(); }
+      else if (m.type === 'aaPlace') {
+        const A = UNITS[m.unit]?.aa; if (me.side !== 'defense' || !A || guns.length >= A.max) return;
+        const gun: GunRec = { id: nextGun++, pid: 1, by: me.name, unit: m.unit, x0: m.x, z0: m.z, x: m.x, z: m.z, t: s.now() }; guns.push(gun); saveGuns();
+        queueMicrotask(() => handler({ type: 'aa', gun: { ...gun } })); return;
+      }
+      else if (m.type === 'aaMove') {
+        const gun = guns.find(g => g.id === m.id); if (me.side !== 'defense' || !gun) return;
+        gun.x0 = m.x0; gun.z0 = m.z0; gun.x = m.x; gun.z = m.z; gun.t = s.now(); saveGuns();
+        queueMicrotask(() => handler({ type: 'aa', gun: { ...gun } })); return;
+      }
+      else if (m.type === 'aaDel') { if (me.side !== 'defense') return; guns = guns.filter(g => g.id !== m.id); saveGuns(); }
       else if (m.type === 'side') { me.side = m.side; roster(); return; }
       else if (m.type === 'name') { me.name = m.name; roster(); return; }
-      else if (m.type === 'reset') { log = []; me.launches = me.hits = 0; persist(); roster(); }
+      else if (m.type === 'reset') { log = []; me.launches = me.hits = me.downs = 0; persist(); roster(); }
       else if (m.type !== 'env') return;
       queueMicrotask(() => handler(m));
     } };

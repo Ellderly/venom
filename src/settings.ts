@@ -18,6 +18,7 @@ export interface Settings {
   known: string[]; // юниты, которые уже предлагались на быструю панель
 }
 const DEF: Settings = { nick: '', volume: 0.7, uiScale: 1, perf: true, minimap: true, addr: '', keys: {}, quick: { attack: ['geran2'], defense: [] }, known: ['geran2'] };
+const NEW: [string, Side][] = [['geran5', 'attack'], ['mfg', 'defense']]; // юниты обновлений: один раз встают в первый свободный слот быстрой панели
 
 export const S: Settings = (() => {
   let s: Partial<Settings> = {};
@@ -25,8 +26,8 @@ export const S: Settings = (() => {
   const out = { ...DEF, ...s, keys: { ...s.keys }, quick: { attack: [...(s.quick?.attack ?? DEF.quick.attack)], defense: [...(s.quick?.defense ?? [])] } };
   for (const [a, [, code]] of Object.entries(ACTIONS)) out.keys[a] ??= code;
   out.known = [...(s.known ?? DEF.known)];
-  for (const id of ['geran5']) if (!out.known.includes(id)) { // новый юнит обновления — один раз в первый свободный слот
-    out.known.push(id); if (!out.quick.attack.includes(id)) { const i = out.quick.attack.findIndex(q => !q); if (i >= 0) out.quick.attack[i] = id; else if (out.quick.attack.length < 9) out.quick.attack.push(id); }
+  for (const [id, side] of NEW) if (!out.known.includes(id)) {
+    out.known.push(id); const q = out.quick[side]; if (!q.includes(id)) { const i = q.findIndex(x => !x); if (i >= 0) q[i] = id; else if (q.length < 9) q.push(id); }
   }
   return out;
 })();

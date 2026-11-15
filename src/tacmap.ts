@@ -8,6 +8,8 @@ export interface TacData {
   /** Планирование запуска: выбранная точка удара и кольца «время подлёта». */
   aim: { tx: number; tz: number; rings: { r: number; label: string }[] } | null;
   cursor: { x: number; z: number } | null;
+  /** Огневые группы ПВО (видит только оборона). */
+  guns: { x: number; z: number; r: number; ready: boolean; sel: boolean; label: string }[];
 }
 
 function drawDrone(g: CanvasRenderingContext2D, px: number, py: number, hdg: number, s: number) {
@@ -66,6 +68,11 @@ export class TacMap {
     g.setLineDash([]);
     if (k > 0.035) for (const mk of this.marks) { const x = X(mk.x), y = Y(mk.z); g.fillStyle = '#ffe9a8'; g.beginPath(); g.moveTo(x, y - 5); g.lineTo(x + 4, y); g.lineTo(x, y + 5); g.lineTo(x - 4, y); g.fill(); g.fillStyle = 'rgba(255,240,200,0.9)'; g.fillText(mk.name, x, y + 17); } // знаковые объекты — ориентиры
     for (const h of d.hits) { const x = X(h.x), y = Y(h.z); g.fillStyle = 'rgba(20,10,8,0.85)'; g.beginPath(); g.arc(x, y, Math.max(2.5, 40 * k), 0, 6.283); g.fill(); g.strokeStyle = '#ff9a3d'; g.lineWidth = 1; g.stroke(); }
+    for (const q of d.guns) { // зона огня и сама группа
+      const x = X(q.x), y = Y(q.z); g.lineWidth = q.sel ? 2 : 1.2; g.strokeStyle = q.sel ? '#fff' : q.ready ? 'rgba(74,168,255,0.9)' : 'rgba(74,168,255,0.4)'; g.fillStyle = 'rgba(74,168,255,0.08)';
+      g.beginPath(); g.arc(x, y, q.r * k, 0, 6.283); g.fill(); g.stroke();
+      g.fillStyle = q.ready ? '#4aa8ff' : '#7f93a6'; g.fillRect(x - 4, y - 4, 8, 8); g.fillStyle = '#cfe6ff'; g.fillText(q.label, x, y + 17);
+    }
     for (const t of d.drones) { // маршрут: пройденная часть тусклая, оставшаяся яркая
       g.lineWidth = 1.5; g.strokeStyle = 'rgba(255,90,54,0.3)'; g.beginPath(); g.moveTo(X(t.sx), Y(t.sz)); g.lineTo(X(t.x), Y(t.z)); g.stroke();
       g.strokeStyle = 'rgba(255,90,54,0.9)'; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(X(t.x), Y(t.z)); g.lineTo(X(t.tx), Y(t.tz)); g.stroke(); g.setLineDash([]);
@@ -104,6 +111,7 @@ export class Minimap {
     const X = (x: number) => (x - m.x0) / (m.x1 - m.x0) * W, Y = (z: number) => (z - m.z0) / (m.z1 - m.z0) * H;
     g.drawImage(this.base, 0, 0);
     g.fillStyle = '#ff9a3d'; for (const h of d.hits) g.fillRect(X(h.x) - 1, Y(h.z) - 1, 2, 2);
+    g.fillStyle = '#4aa8ff'; for (const q of d.guns) g.fillRect(X(q.x) - 1.5, Y(q.z) - 1.5, 3, 3);
     for (const t of d.drones) { g.strokeStyle = 'rgba(255,90,54,0.6)'; g.lineWidth = 1; g.beginPath(); g.moveTo(X(t.x), Y(t.z)); g.lineTo(X(t.tx), Y(t.tz)); g.stroke(); drawDrone(g, X(t.x), Y(t.z), t.hdg, 4.5); }
     const c = d.cam, x = Math.min(W - 3, Math.max(3, X(c.x))), y = Math.min(H - 3, Math.max(3, Y(c.z)));
     g.save(); g.translate(x, y); g.rotate(-c.yaw); g.fillStyle = 'rgba(255,255,255,0.25)'; g.strokeStyle = '#fff'; g.lineWidth = 1;
