@@ -2,17 +2,22 @@
 import { Launch } from './sim';
 import { GunRec } from './aa';
 import { UNITS, RULES, GameMode } from './units';
+import { OpState } from './op';
 import { Side } from './units';
 
 export interface Player { id: number; name: string; side: Side | null; launches: number; hits: number; downs: number; ping: number; points: number } // points — очки на момент рассылки списка, дальше клиент досчитывает доход сам
 
 export type Msg =
-  | { type: 'welcome'; you: number; now: number; world: string; players: Player[]; launches: Launch[]; guns?: GunRec[]; mode?: GameMode; env?: { hour: number; speed: number } }
+  | { type: 'welcome'; you: number; now: number; world: string; players: Player[]; launches: Launch[]; guns?: GunRec[]; mode?: GameMode; op?: OpState | null; env?: { hour: number; speed: number } }
   | { type: 'players'; players: Player[] }
   | { type: 'hello'; name: string; side: Side | null }
   | { type: 'side'; side: Side }
   | { type: 'name'; name: string }
-  | { type: 'launch'; launch: Launch }
+  | { type: 'launch'; launch: Launch; delay?: number }                         // delay — на планировании операции: через сколько секунд после начала боя вылетит
+  | { type: 'op'; op: OpState | null }                                         // состояние операции
+  | { type: 'opStart'; targets: { name: string; x: number; z: number; r: number; bridge: number }[]; zones: { x: number; z: number; r: number }[]; planS: number; budget: Record<Side, number> }
+  | { type: 'opReady' } | { type: 'opUnplan'; id: number } | { type: 'opHit'; i: number; tnt: number; launch: number }
+  | { type: 'planned'; launch: Launch & { delay?: number } } | { type: 'unplanned'; id: number } // отложенные запуски — видит только атака
   | { type: 'hit'; id: number; buildings: number }
   | { type: 'down'; id: number; t: number; gun: number }                       // цель сбита (решает ведущий клиент)
   | { type: 'aaPlace'; unit: string; x: number; z: number }                    // поставить огневую группу
@@ -87,7 +92,10 @@ function localSession(w: WorldInfo, name: string, touch: (id: string, hits: numb
   const s: Session = { online: false, me: 1, world: w.name, addr: '', now: () => performance.now() / 1000, close: () => {},
     listen: h => { handler = h; h({ type: 'welcome', you: 1, now: s.now(), world: w.name, players: [{ ...me }], launches: log.map(L => ({ ...L, t0: -1e7 })), guns, mode }); },
     send(m) {
-      if (m.type === 'launch') { if (me.side !== 'attack' || !(m.launch.unit in RULES.cost) || !spend(RULES.cost[m.launch.unit])) return; const L = m.launch; L.id = nextId++; L.by = me.name; L.pid = 1; L.t0 = s.now(); log.push({ ...L }); me.launches++; persist(); roster(); }
+      if (m.type === 'opStart') { queueMicrotask(() => handler({ type: 'deny', reason: 'Операция идёт через сервер: запустите программу VENOM (или npm run server) и откройте мир в ней' })); return; }
+      if (m.type === 'launch') { if (me.side !== 'attack' || !(m.launch.unit in RULES.cost)) return;
+        if (mode !== 'sandbox' && Math.hypot(m.launch.sx - m.launch.tx, m.launch.sz - m.launch.tz) < RULES.minRange * 0.97) { queueMicrotask(() => handler({ type: 'deny', reason: 'Слишком близко' })); return; }
+        if (!spend(RULES.cost[m.launch.unit])) return; const L = m.launch; L.id = nextId++; L.by = me.name; L.pid = 1; L.t0 = s.now(); log.push({ ...L }); me.launches++; persist(); roster(); }
       else if (m.type === 'hit') { me.hits += m.buildings; roster(); return; }
       else if (m.type === 'down') { const L = log.find(x => x.id === m.id); if (!L || L.down) return; L.down = { t: m.t, gun: m.gun } as Launch['down']; me.downs++; if (mode === 'game') setBal(bal() + E.bounty * (RULES.cost[L.unit] ?? 0)); persist(); roster(); }
       else if (m.type === 'aaPlace') {

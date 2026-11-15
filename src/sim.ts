@@ -35,7 +35,7 @@ export function trajectory(L: Launch, map: MapData, t: number, out: State): Stat
     const amp = Math.min(60, D * 0.02) * Math.sin(Math.PI * k) , w = Math.sin(s / 700 + L.seed) * amp;
     o.x = L.sx + ux * s - uz * w; o.z = L.sz + uz * s + ux * w;
     const cy = u.terrain ? follow(s) : L.cruiseY;
-    const ty = map.heightAt(L.tx, L.tz), dd = (cy - ty) / Math.tan(u.diveDeg * Math.PI / 180), rem = D - s;
+    const ty = map.surfaceAt(L.tx, L.tz), dd = (cy - ty) / Math.tan(u.diveDeg * Math.PI / 180), rem = D - s;
     if (rem < dd) { const q = 1 - rem / dd; o.y = cy - (cy - ty) * q * q * (1.6 - 0.6 * q); } else o.y = cy;
     if (tt * u.speed > D) o.y -= (tt * u.speed - D) * 0.8; // на случай, если пролетел точку цели, не встретив препятствий
   };

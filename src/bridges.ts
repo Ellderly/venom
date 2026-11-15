@@ -9,6 +9,8 @@ const STEP = 8;
 
 export class Bridges {
   group = new THREE.Group();
+  /** Мост, повреждённый последним вызовом blast. */
+  lastId = -1;
   private meshes = new Map<number, THREE.Mesh>();
   private mat = new THREE.ShaderMaterial({
     uniforms: { ...U }, side: THREE.DoubleSide,
@@ -90,17 +92,22 @@ export class Bridges {
 
   /** Взрыв у моста: участок полотна в радиусе обрушивается. Возвращает число повреждённых мостов. */
   blast(x: number, y: number, z: number, r: number) {
-    const hit = this.map.bridgeAt(x, z, r); if (!hit) return 0;
+    this.lastId = -1; const hit = this.map.bridgeAt(x, z, r); if (!hit) return 0;
     const [b, s, dy] = hit; if (Math.abs(dy - y) > r + 3) return 0;
-    let c0 = Math.max(0, s - r * 1.3), c1 = Math.min(b.len, s + r * 1.3);
+    let c0 = Math.max(0, s - r * 1.3), c1 = Math.min(b.len, s + r * 1.3); this.lastId = b.id;
+    if (r >= 7) { // мощный заряд обрушивает пролёт целиком — от опоры до опоры
+      const gap = b.len > 400 ? 55 : 38, first = Math.min(gap, b.len / 2);
+      c0 = c0 < first ? 0 : first + Math.floor((c0 - first) / gap) * gap; c1 = c1 < first ? first : Math.min(b.len, first + Math.ceil((c1 - first) / gap) * gap);
+    }
     b.cuts = b.cuts.filter(q => { if (q[1] < c0 || q[0] > c1) return true; c0 = Math.min(c0, q[0]); c1 = Math.max(c1, q[1]); return false; }); // сливаем с соседними проломами
     b.cuts.push([c0, c1]); this.build(b);
     const p = [0, 0, 0, 0, 0];
-    for (let i = 0; i < 26; i++) { // обломки полотна падают вниз
+    for (let i = 0, n = Math.min(90, 26 + Math.round(c1 - c0)); i < n; i++) { // обломки полотна падают вниз
       this.at(b, c0 + Math.random() * (c1 - c0), p); const o = (Math.random() - 0.5) * b.w;
       this.destr.chunk(p[0] + p[4] * o, p[1] - Math.random(), p[2] - p[3] * o, (Math.random() - 0.5) * 9, 2 + Math.random() * 7, (Math.random() - 0.5) * 9, 0.8 + Math.random() * 1.6, 120, 118, 112);
     }
     this.fx.dust(x, dy, z, r * 1.4);
+    for (let q = c0; q <= c1; q += 12) { this.at(b, q, p); this.fx.dust(p[0], p[1] - 2, p[2], 9); this.fx.dust(p[0], this.map.heightAt(p[0], p[2]) + 1, p[2], 12); } // пыль вдоль пролёта и всплески внизу
     return 1;
   }
 

@@ -41,19 +41,20 @@ function createWorld(name, extra = {}) {
 let world = null;              // активный мир
 let launches = [], nextId = 1;
 let guns = [], nextGun = 1;   // огневые группы ПВО
+let op = null;                // текущая операция (режим 'op')
 // Правила, общие с клиентом: цены, экономика, лимиты.
 const RULES = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'rules.json'), 'utf8'));
 const E = RULES.economy, COST = RULES.cost, AA = RULES.aaMax;
-let mode = 'sandbox';         // 'sandbox' — без очков, 'game' — запуск и постановка стоят очков
+let mode = 'sandbox';         // 'sandbox' — без очков, 'game' — очки с доходом, 'op' — операция: фиксированный бюджет, планирование и бой
 const wallets = new Map();    // ник → { p, at }: очки сохраняются за игроком, пока открыт мир
-const bal = me => Math.min(E.cap, me.wallet.p + E.income * (now() - me.wallet.at));
-const setBal = (me, v) => { me.wallet.p = Math.max(0, Math.min(E.cap, v)); me.wallet.at = now(); };
-const spend = (me, c) => { if (mode !== 'game') return true; const b = bal(me); if (b < c) return false; setBal(me, b - c); return true; };
+const bal = me => mode === 'game' ? Math.min(E.cap, me.wallet.p + E.income * (now() - me.wallet.at)) : me.wallet.p; // доход — только в режиме «Игра»
+const setBal = (me, v) => { me.wallet.p = Math.max(0, mode === 'game' ? Math.min(E.cap, v) : v); me.wallet.at = now(); };
+const spend = (me, c) => { if (mode === 'sandbox') return true; const b = bal(me); if (b < c) return false; setBal(me, b - c); return true; };
 let env = { hour: 15, speed: 10, at: now() };
 const hourNow = () => (env.hour + (now() - env.at) * env.speed / 3600) % 24;
 
 let saveTimer = null;
-const flush = () => { clearTimeout(saveTimer); saveTimer = null; if (!world) return; world.launches = launches; world.guns = guns.map(g => ({ ...g, path: undefined })); world.mode = mode; world.env = { hour: hourNow(), speed: env.speed }; world.updated = Date.now(); try { fs.writeFileSync(worldFile(world.id), JSON.stringify(world)); } catch (e) { console.error('VENOM: мир не сохранён', e.message); } };
+const flush = () => { clearTimeout(saveTimer); saveTimer = null; if (!world) return; world.launches = launches; world.guns = guns.map(g => ({ ...g, path: undefined })); world.mode = mode === 'op' ? 'sandbox' : mode; /* операция не сохраняется */ world.env = { hour: hourNow(), speed: env.speed }; world.updated = Date.now(); try { fs.writeFileSync(worldFile(world.id), JSON.stringify(world)); } catch (e) { console.error('VENOM: мир не сохранён', e.message); } };
 const save = () => { if (!saveTimer) saveTimer = setTimeout(flush, 500); };
 setInterval(() => { if (players.size) save(); }, 60000).unref();
 for (const s of ['SIGINT', 'SIGTERM']) process.on(s, () => { flush(); process.exit(0); });
@@ -63,7 +64,7 @@ function openWorld(id) {
   flush(); world = w;
   launches = w.launches.map(L => ({ ...L, t0: -1e7 })); // всё, что было в воздухе при выходе, считается долетевшим
   nextId = launches.reduce((m, L) => Math.max(m, (L.id || 0) + 1), 1);
-  mode = w.mode === 'game' ? 'game' : 'sandbox'; wallets.clear();
+  stopOp(); mode = w.mode === 'game' ? 'game' : 'sandbox'; wallets.clear();
   guns = (w.guns || []).map(g => ({ ...g, x0: g.x, z0: g.z, t: -1e7, path: undefined })); nextGun = guns.reduce((m, g) => Math.max(m, (g.id || 0) + 1), 1); // после загрузки все группы стоят на местах
   env = { hour: Number(w.env?.hour) || 15, speed: Number(w.env?.speed) || 0, at: now() };
   console.log(`VENOM: открыт мир «${w.name}», попаданий: ${launches.length}`);
@@ -152,14 +153,21 @@ wss.on('connection', ws => {
       me.name = uniqueName(cleanName(m.name, 'Игрок ' + me.id), me);
       me.wallet = wallets.get(me.name) ?? { p: E.start, at: now() }; wallets.set(me.name, me.wallet);
       players.set(ws, me);
-      send(ws, { type: 'welcome', you: me.id, now: now(), world: world.name, players: roster(), launches, guns, mode, env: { hour: hourNow(), speed: env.speed } });
+      send(ws, { type: 'welcome', you: me.id, now: now(), world: world.name, players: roster(), launches, guns, mode, op: opView(), env: { hour: hourNow(), speed: env.speed } });
       sendRoster();
       return;
     }
     if (!me) return;
     if (m.type === 'launch' && validLaunch(m.launch) && launches.length < 5000) {
       if (me.side !== 'attack' || !(m.launch.unit in COST)) return; // запускает только сторона атаки
+      const L0 = m.launch;
+      if (mode !== 'sandbox' && Math.hypot(L0.sx - L0.tx, L0.sz - L0.tz) < RULES.minRange * 0.97) { send(ws, { type: 'deny', reason: 'Слишком близко: вне песочницы цели стартуют не ближе ' + RULES.minRange / 1000 + ' км' }); return; }
+      if (mode === 'op' && (!op || op.phase === 'done')) { send(ws, { type: 'deny', reason: 'Операция завершена' }); return; }
       if (!spend(me, COST[m.launch.unit])) { send(ws, { type: 'deny', reason: 'Не хватает очков' }); return; }
+      if (mode === 'op' && op.phase === 'plan') { // планирование: запуск откладывается до начала боя, оборона его не видит
+        L0.id = nextId++; L0.by = me.name; L0.pid = me.id; L0.delay = Math.max(0, Math.min(600, Number(m.delay) || 0)); op.plan.push(L0);
+        toSide('attack', { type: 'planned', launch: L0 }); sendRoster(); return;
+      }
       const L = m.launch; L.id = nextId++; L.by = me.name; L.pid = me.id; L.t0 = now() + 0.25; // небольшой запас, чтобы у всех старт был одновременным
       launches.push(L); me.launches++; broadcast({ type: 'launch', launch: L }); sendRoster(); save();
     } else if (m.type === 'hit') { // владелец запуска сообщает результат — для таблицы игроков
@@ -187,11 +195,41 @@ wss.on('connection', ws => {
       const g = guns.find(x => x.id === m.id); if (me.side !== 'defense' || !g) return;
       guns = guns.filter(x => x.id !== m.id); broadcast({ type: 'aaDel', id: m.id });
       if (mode === 'game') setBal(me, bal(me) + E.refund * (COST[g.unit] || 0)); // за снятую группу возвращается часть цены
+      else if (mode === 'op' && op?.phase === 'plan') setBal(me, bal(me) + (COST[g.unit] || 0)); // на планировании расстановку можно менять без потерь
       sendRoster(); save();
     } else if (m.type === 'mode') { // админ переключает режим: у всех очки сбрасываются к стартовым
-      mode = m.mode === 'game' ? 'game' : 'sandbox'; for (const w of wallets.values()) { w.p = E.start; w.at = now(); }
-      broadcast({ type: 'mode', mode }); sendRoster(); save();
-    } else if (m.type === 'side') { if (SIDES.includes(m.side) && me.side !== m.side) { me.side = m.side; sendRoster(); } }
+      stopOp(); mode = m.mode === 'game' ? 'game' : 'sandbox'; for (const w of wallets.values()) { w.p = E.start; w.at = now(); }
+      broadcast({ type: 'mode', mode }); broadcast({ type: 'op', op: null }); sendRoster(); save();
+    } else if (m.type === 'opStart') { // админ начинает операцию: цели и районы выбирает его клиент (у сервера нет карты)
+      const num = v => Number.isFinite(Number(v)), T = Array.isArray(m.targets) ? m.targets.slice(0, 8) : [], Z = Array.isArray(m.zones) ? m.zones.slice(0, 16) : [];
+      if (!T.length || !T.every(t => t && num(t.x) && num(t.z)) || !Z.every(z => z && num(z.x) && num(z.z) && num(z.r))) return;
+      stopOp(); mode = 'op';
+      launches = []; for (const g of guns) broadcast({ type: 'aaDel', id: g.id }); guns = []; broadcast({ type: 'reset' }); // чистое поле
+      const B = { attack: Math.max(0, Math.min(5000, Number(m.budget?.attack) || RULES.op.budget.attack)), defense: Math.max(0, Math.min(5000, Number(m.budget?.defense) || RULES.op.budget.defense)) };
+      for (const p of players.values()) { p.launches = p.hits = p.downs = 0; p.wallet.p = p.side ? B[p.side] : 0; p.wallet.op = !!p.side; }
+      for (const w of wallets.values()) if (![...players.values()].some(p => p.wallet === w)) { w.p = 0; w.op = false; }
+      op = { phase: 'plan', endsAt: now() + Math.max(20, Math.min(1800, Number(m.planS) || RULES.op.planS)), budget: B, plan: [], ready: {}, result: null, timers: [], pending: 0, hitKeys: new Set(),
+        targets: T.map(t => ({ name: cleanName(t.name, 'Цель'), x: Number(t.x), z: Number(t.z), r: Math.max(20, Math.min(2000, Number(t.r) || 80)), bridge: Number.isFinite(t.bridge) ? t.bridge : -1, hp: RULES.op.hp, max: RULES.op.hp })),
+        zones: Z.map(z => ({ x: Number(z.x), z: Number(z.z), r: Number(z.r) })) };
+      broadcast({ type: 'mode', mode }); sendOp(); sendRoster();
+    } else if (m.type === 'opReady') {
+      if (!op || op.phase !== 'plan' || !me.side) return; op.ready[me.side] = true;
+      const sides = new Set([...players.values()].map(p => p.side).filter(Boolean));
+      if ([...sides].every(s => op.ready[s])) startBattle(); else sendOp();
+    } else if (m.type === 'opUnplan') {
+      if (!op || op.phase !== 'plan') return; const i = op.plan.findIndex(L => L.id === m.id && L.pid === me.id); if (i < 0) return;
+      const [L] = op.plan.splice(i, 1); setBal(me, bal(me) + (COST[L.unit] || 0)); toSide('attack', { type: 'unplanned', id: L.id }); sendRoster();
+    } else if (m.type === 'opHit') { // ведущий клиент сообщает о попадании по цели операции
+      const t = op?.targets[m.i], tnt = Math.max(0, Math.min(2000, Number(m.tnt) || 0)), key = m.i + ':' + m.launch;
+      if (!op || op.phase !== 'battle' || !t || op.hitKeys.has(key)) return; op.hitKeys.add(key);
+      t.hp = Math.max(0, t.hp - tnt); sendOp(); checkOp();
+    } else if (m.type === 'side') {
+      if (!SIDES.includes(m.side) || me.side === m.side) return;
+      if (mode === 'op' && op && op.phase !== 'done' && me.side) { send(ws, { type: 'deny', reason: 'Во время операции сторону менять нельзя' }); return; }
+      me.side = m.side;
+      if (mode === 'op' && op && !me.wallet.op) { me.wallet.p = op.budget[m.side]; me.wallet.op = true; } // подключился во время операции — получает бюджет стороны
+      sendRoster(); if (op) sendOp(); if (op?.phase === 'plan' && m.side === 'attack') for (const L of op.plan) send(ws, { type: 'planned', launch: L });
+    }
     else if (m.type === 'name') { const n = uniqueName(cleanName(m.name, me.name), me); if (n !== me.name) { me.name = n; sendRoster(); } }
     else if (m.type === 'ping') { me.ping = Math.max(0, Math.min(9999, Math.round(Number(m.rtt) || 0))); send(ws, { type: 'pong', t: m.t, now: now() }); }
     else if (m.type === 'env') { env = { hour: Number(m.hour) || 0, speed: Math.max(0, Math.min(3600, Number(m.speed) || 0)), at: now() }; broadcast({ type: 'env', hour: env.hour, speed: env.speed }); save(); }
@@ -201,6 +239,34 @@ wss.on('connection', ws => {
   ws.on('error', () => {});
 });
 setInterval(sendRoster, 5000).unref(); // пинг в таблице обновляется у всех
+
+// ---------- операция: планирование → бой → итог ----------
+// op — состояние операции (объявлено ниже как let, чтобы обработчики сообщений видели его)
+function opView() { return op ? { phase: op.phase, endsAt: op.endsAt, targets: op.targets, zones: op.zones, ready: op.ready, result: op.result, budget: op.budget } : null; }
+function sendOp() { broadcast({ type: 'op', op: opView() }); }
+function toSide(side, m) { for (const [ws, p] of players) if (p.side === side) send(ws, m); }
+function stopOp() { if (op) for (const t of op.timers) clearTimeout(t); op = null; }
+function startBattle() {
+  if (!op || op.phase !== 'plan') return;
+  op.phase = 'battle'; op.endsAt = now() + RULES.op.battleS; op.pending = op.plan.length;
+  for (const L of op.plan) op.timers.push(setTimeout(() => { // запланированные цели вылетают по своим задержкам
+    if (!op) return; op.pending--; delete L.delay; L.t0 = now() + 0.25; launches.push(L);
+    const owner = [...players.values()].find(p => p.id === L.pid); if (owner) owner.launches++;
+    broadcast({ type: 'launch', launch: L }); sendRoster();
+  }, L.delay * 1000));
+  op.plan = []; sendOp();
+}
+function checkOp() {
+  if (!op || op.phase !== 'battle') return;
+  const dead = op.targets.filter(t => t.hp <= 0).length, minCost = Math.min(...Object.keys(COST).filter(u => !AA[u]).map(u => COST[u]));
+  const flying = launches.some(L => now() < L.t0 + (L.down ? L.down.t + 70 : L.impactT) + 4);
+  const spent = ![...players.values()].some(p => p.side === 'attack' && bal(p) >= minCost);
+  if (dead === op.targets.length || now() >= op.endsAt || (!op.pending && !flying && spent)) {
+    const need = Math.ceil(op.targets.length * RULES.op.need);
+    op.phase = 'done'; op.result = { destroyed: dead, total: op.targets.length, need, winner: dead >= need ? 'attack' : 'defense' }; sendOp();
+  }
+}
+setInterval(() => { if (!op) return; if (op.phase === 'plan' && now() >= op.endsAt) startBattle(); else checkOp(); }, 1000).unref();
 
 // Если порт занят (например, осталась запущенной старая копия игры), берём следующий свободный.
 export const ready = new Promise(resolve => {

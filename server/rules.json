@@ -1,5 +1,32 @@
 {
-  "economy": { "start": 150, "income": 0.5, "cap": 600, "refund": 0.5, "bounty": 0.25 },
-  "cost": { "geran2": 20, "geran5": 90, "kh101": 250, "mfg": 30 },
-  "aaMax": { "mfg": 12 }
+  "economy": {
+    "start": 150,
+    "income": 0.5,
+    "cap": 600,
+    "refund": 0.5,
+    "bounty": 0.25
+  },
+  "cost": {
+    "geran2": 20,
+    "geran5": 90,
+    "kh101": 250,
+    "mfg": 30
+  },
+  "aaMax": {
+    "mfg": 12
+  },
+  "minRange": 8000,
+  "op": {
+    "budget": {
+      "attack": 600,
+      "defense": 300
+    },
+    "planS": 180,
+    "targets": 3,
+    "hp": 100,
+    "need": 0.6,
+    "zoneR": 3000,
+    "decoys": 2,
+    "battleS": 1500
+  }
 }

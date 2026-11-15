@@ -2,9 +2,10 @@
 // Меню, арсенал, быстрая панель и карточки строятся из этого файла: новый юнит = новая запись в UNITS.
 import RULES_JSON from '../server/rules.json';
 /** Правила игры, общие для клиента и сервера: цены, экономика, лимиты (server/rules.json). */
-export const RULES = RULES_JSON as { economy: { start: number; income: number; cap: number; refund: number; bounty: number }; cost: Record<string, number>; aaMax: Record<string, number> };
-export type GameMode = 'sandbox' | 'game';
-export const MODE_NAME: Record<GameMode, string> = { sandbox: 'Песочница', game: 'Игра' };
+export const RULES = RULES_JSON as { economy: { start: number; income: number; cap: number; refund: number; bounty: number }; cost: Record<string, number>; aaMax: Record<string, number>; minRange: number;
+  op: { budget: Record<Side, number>; planS: number; targets: number; hp: number; need: number; zoneR: number; decoys: number; battleS: number } };
+export type GameMode = 'sandbox' | 'game' | 'op';
+export const MODE_NAME: Record<GameMode, string> = { sandbox: 'Песочница', game: 'Игра', op: 'Операция' };
 export type Side = 'attack' | 'defense';
 export const SIDE_NAME: Record<Side, string> = { attack: 'Атака', defense: 'Оборона' };
 
