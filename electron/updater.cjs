@@ -2,6 +2,8 @@
 // Не зависит от Electron: версию и «выйти» получает снаружи, поэтому логику можно проверить обычным Node.
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
+const os = require('node:os');
+const path = require('node:path');
 
 /** v0.1.18 → [0, 1, 18]; сравнение по числам, а не по строкам. */
 const parse = v => String(v).replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
@@ -11,7 +13,19 @@ const newer = (a, b) => { const x = parse(a), y = parse(b); for (let i = 0; i < 
  * repos — где искать релизы, по порядку (первый доступный); version — текущая версия; exe — путь к VENOM.exe
  * (у переносимой сборки — переменная PORTABLE_EXECUTABLE_FILE); quit — закрыть программу после подмены.
  */
-function createUpdater({ repos, version, exe, quit, api = 'https://api.github.com' }) {
+/**
+ * Windows не даёт переименовать или перезаписать запущенный exe, поэтому подмену делает помощник — командный файл:
+ * ждёт, пока программа закроется и файл освободится, кладёт новый на место старого и запускает его.
+ */
+function swapScript(exe, tmp) {
+  const q = p => p.replace(/%/g, '%%'); // знак процента в пути командный файл понял бы как переменную
+  return ['@echo off', 'chcp 65001 >nul', 'set N=0', ':loop',
+    `move /Y "${q(tmp)}" "${q(exe)}" >nul 2>&1`, 'if not errorlevel 1 goto ok',
+    'set /a N+=1', 'if %N% GEQ 120 goto end', 'ping -n 2 127.0.0.1 >nul', 'goto loop',   // до двух минут, по попытке в секунду
+    ':ok', `start "" "${q(exe)}"`, ':end', 'del "%~f0"', ''].join('\r\n');
+}
+
+function createUpdater({ repos, version, exe, quit, api = 'https://api.github.com', platform = process.platform }) {
   const st = { current: version, latest: null, notes: '', size: 0, available: false, canInstall: !!exe, state: 'idle', progress: 0, error: '' };
   let asset = null, checked = 0;
   try { if (exe) fs.rmSync(exe + '.old', { force: true }); } catch { /* старая копия ещё занята — удалится в следующий раз */ }
@@ -45,10 +59,15 @@ function createUpdater({ repos, version, exe, quit, api = 'https://api.github.co
         for await (const chunk of r.body) { got += chunk.length; st.progress = asset.size ? got / asset.size : 0; if (!out.write(chunk)) await new Promise(res => out.once('drain', res)); }
         await new Promise((res, rej) => { out.on('error', rej); out.end(res); });
         if (asset.size && got !== asset.size) throw new Error('Файл скачан не полностью');
-        // запущенный exe в Windows нельзя перезаписать, но можно переименовать: старый — в .old, новый — на его место
-        fs.rmSync(exe + '.old', { force: true }); fs.renameSync(exe, exe + '.old'); fs.renameSync(tmp, exe);
-        st.state = 'restarting'; st.progress = 1;
-        const child = spawn(exe, [], { detached: true, stdio: 'ignore' }); child.on('error', () => {}); child.unref(); // не запустилась — пользователь откроет сам, файл уже новый
+        st.progress = 1;
+        if (platform === 'win32') { // подмена — после выхода программы, см. swapScript
+          const bat = path.join(os.tmpdir(), 'venom-update.bat'); fs.writeFileSync(bat, swapScript(exe, tmp), 'utf8');
+          const child = spawn('cmd.exe', ['/c', bat], { detached: true, stdio: 'ignore', windowsHide: true }); child.on('error', () => {}); child.unref();
+        } else { // там, где запущенный файл можно заменить, меняем сразу
+          fs.rmSync(exe + '.old', { force: true }); fs.renameSync(exe, exe + '.old'); fs.renameSync(tmp, exe);
+          const child = spawn(exe, [], { detached: true, stdio: 'ignore' }); child.on('error', () => {}); child.unref();
+        }
+        st.state = 'restarting';
         setTimeout(quit, 800);
       } catch (e) { try { fs.rmSync(tmp, { force: true }); } catch { /* нечего удалять */ } st.state = 'error'; st.error = String(e && e.message || e); }
     })();
@@ -56,4 +75,4 @@ function createUpdater({ repos, version, exe, quit, api = 'https://api.github.co
   }
   return { check, install, status: () => st };
 }
-module.exports = { createUpdater, newer };
+module.exports = { createUpdater, newer, swapScript };
