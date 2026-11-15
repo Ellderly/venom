@@ -66,7 +66,7 @@ function ellipseRing(b: Builder, a: number, c: number, prof: number[][], col: RG
 /** Ярусная колокольня. */
 function belfry(b: Builder, tiers: [number, number][], wall: RGB, trim: RGB, dome: RGB) {
   let y = 0;
-  for (const [r, h] of tiers) { b.cyl(r, r, h, 0, y, 0, wall, 0, 8); b.cyl(r * 1.08, r * 1.08, h * 0.06, 0, y + h * 0.94, 0, trim, 0, 8); for (let i = 0; i < 8; i++) { const a = i / 8 * 6.2832 + 0.39; b.box(r * 0.3, h * 0.5, 0.4, Math.cos(a) * r * 0.93, y + h * 0.25, Math.sin(a) * r * 0.93, DARK, 3, -a + Math.PI / 2); } y += h; }
+  for (const [r, h] of tiers) { b.cyl(r, r, h, 0, y, 0, wall, 0, 8); b.cyl(r * 1.08, r * 1.08, h * 0.06, 0, y + h * 0.94, 0, trim, 0, 8); for (let i = 0; i < 8; i++) { const a = i / 8 * 6.2832 + 0.39; b.box(r * 0.2, h * 0.42, 0.4, Math.cos(a) * r * 0.93, y + h * 0.25, Math.sin(a) * r * 0.93, DARK, 3, -a + Math.PI / 2); } y += h; }
   const r = tiers[tiers.length - 1][0]; b.onion(r * 0.95, 0, y, 0, dome, wall, r * 0.5); return y;
 }
 
@@ -115,7 +115,7 @@ export const LANDMARKS: Def[] = [
     ellipseRing(b, 148, 122, [[0.985, 28.5], [0.62, 6.5]], [70, 110, 190]);                                 // кресла
     ellipseRing(b, 152, 126, [[1.02, 38], [1.0, 44], [0.6, 40], [0.6, 39], [1.02, 38]], [232, 234, 236], 1); // мембранная крыша
     for (let i = 0; i < 40; i++) { const a = i / 40 * 6.2832; b.beam([Math.cos(a) * 150, 0, Math.sin(a) * 124], [Math.cos(a) * 156, 46, Math.sin(a) * 130], 0.7, WHITE, 1); }
-    b.box(105, 0.4, 68, 0, 0.6, 0, [70, 140, 66]); b.box(150, 0.3, 100, 0, 0.3, 0, [150, 70, 56]);
+    ellipseRing(b, 148, 122, [[0.52, 2.2], [0.001, 2.2]], [150, 70, 56]); b.box(105, 0.5, 68, 0, 2.0, 0, [70, 140, 66]);   // беговые дорожки и поле
   } },
   { name: 'Вокзал', lat: 50.4406, lon: 30.4893, rot: -0.37, clear: 70, r: 60, h: 40, build(b) {
     b.box(170, 20, 34, 0, 0, 0, SAND); b.box(172, 1.5, 36, 0, 20, 0, [110, 104, 96]); b.box(46, 38, 42, 0, 0, 0, SAND); b.box(48, 2, 44, 0, 38, 0, [110, 104, 96]);

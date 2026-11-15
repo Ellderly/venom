@@ -195,6 +195,7 @@ export class Ground {
     const mp = this.map, p = mp.bPts;
     g.save(); g.shadowColor = 'rgba(0,0,0,0.5)'; g.shadowBlur = Math.max(2, 3.2 * pxPerM); g.fillStyle = 'rgba(52,50,46,0.9)'; g.beginPath(); let n = 0;
     for (const b of mp.buildingsNear(cx, cz, r)) {
+      if (!mp.bH[b]) continue; // дома нет: заменён отдельной моделью
       const a = mp.bStart[b], e = mp.bStart[b + 1];
       g.moveTo(p[a * 2], p[a * 2 + 1]); for (let i = a + 1; i < e; i++) g.lineTo(p[i * 2], p[i * 2 + 1]); g.closePath();
       if (++n % 300 === 0) { g.fill(); g.beginPath(); }

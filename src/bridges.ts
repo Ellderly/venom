@@ -92,7 +92,7 @@ export class Bridges {
   blast(x: number, y: number, z: number, r: number) {
     const hit = this.map.bridgeAt(x, z, r); if (!hit) return 0;
     const [b, s, dy] = hit; if (Math.abs(dy - y) > r + 3) return 0;
-    let c0 = Math.max(0, s - r * 0.85), c1 = Math.min(b.len, s + r * 0.85);
+    let c0 = Math.max(0, s - r * 1.3), c1 = Math.min(b.len, s + r * 1.3);
     b.cuts = b.cuts.filter(q => { if (q[1] < c0 || q[0] > c1) return true; c0 = Math.min(c0, q[0]); c1 = Math.max(c1, q[1]); return false; }); // сливаем с соседними проломами
     b.cuts.push([c0, c1]); this.build(b);
     const p = [0, 0, 0, 0, 0];

@@ -86,7 +86,7 @@ export class FX {
   /** Взрыв боевой части. tnt — тротиловый эквивалент, кг. */
   explode(x: number, y: number, z: number, tnt: number, ground = false) {
     const s = Math.cbrt(tnt), R = Math.random, rnd = () => R() * 2 - 1;
-    this.flashes.push({ x, y: y + s * 2, z, t: 0, dur: 0.9, r: s * 110, k: 9 });
+    this.flashes.push({ x, y: y + s * 2, z, t: 0, dur: 0.9, r: s * 75, k: 5 });
     if (ground) this.scorch(x, y, z, s * 3.6);
     for (let i = 0; i < 9; i++) { const a = R() * 6.283, v = s * (3 + R() * 5); this.fire.add(x + Math.cos(a) * s, y + s * 0.5, z + Math.sin(a) * s, Math.cos(a) * v, s * (5 + R() * 6), Math.sin(a) * v, 0.9 + R() * 0.8, s * 2.4, s * 1.4, 1.0, 0.36 + R() * 0.2, 0.05, 1.3); } // вторичные клубы огня уходят вверх
     for (let i = 0; i < 16; i++) { const g = 0.035 + R() * 0.04; this.smoke.add(x + rnd() * s, y + s * (1 + R() * 2), z + rnd() * s, rnd() * 1.2, s * (2.2 + R() * 2.2), rnd() * 1.2, 9 + R() * 9, s * 2.2, s * 0.75, g, g, g, 0.25, -0.2); }   // столб дыма
