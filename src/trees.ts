@@ -33,7 +33,7 @@ export class Trees {
   lampGroup = new THREE.Group();  // фонари — нет
   private tiles = new Map<number, TreeTile>(); private pending = new Set<number>(); private worker: Worker | null = null; private busy = 0;
   private geos = [0, 1, 2].map(k => treeGeometry(k)); private geosLo = [0, 1, 2].map(k => treeGeometry(k, true));
-  private matLo!: THREE.ShaderMaterial;
+  private matLo!: THREE.ShaderMaterial; private ready: { tile: number; trees: Float32Array; lamps: Float32Array }[] = [];
   private mat: THREE.ShaderMaterial; private bulbMat: THREE.ShaderMaterial; private poolMat: THREE.ShaderMaterial; private poolGeo: THREE.BufferGeometry;
   count = 0;
 
@@ -79,7 +79,7 @@ export class Trees {
     if (q.treeDist > 0) {
       const w = this.worker = new Worker(new URL('./treeworker.ts', import.meta.url), { type: 'module' });
       w.postMessage({ type: 'init', aPts: map.aPts, aRing: map.aRing, aStart: map.aStart, aCls: map.aCls, lPts: map.lPts, lStart: map.lStart, lCls: map.lCls, bPts: map.bPts, bStart: map.bStart, hgt: map.hgt, hNx: map.hNx, hNz: map.hNz, x0: map.meta.x0, z0: map.meta.z0, cell: map.meta.cell });
-      w.onmessage = e => { this.busy--; this.onTile(e.data); };
+      w.onmessage = e => { this.busy--; this.ready.push(e.data); }; // в сцену — по одному тайлу за кадр
     }
   }
 
@@ -120,6 +120,7 @@ export class Trees {
 
   update(cx: number, cz: number, camDist: number, viewH: number, cam: THREE.Vector3) {
     if (!this.worker) return;
+    if (this.ready.length) this.onTile(this.ready.shift()!);
     for (const tt of this.tiles.values()) for (const m of tt.meshes) if (m.userData.hi) m.visible = m.geometry.boundingSphere!.center.distanceTo(cam) < this.q.treeLod + 800; // подробные — только в тайлах рядом с камерой
     const mp = this.map, R = camDist > 7000 ? 0 : Math.min(this.q.treeDist, 700 + camDist * 1.3);
     this.lampGroup.visible = U.uNight.value > 0.03; this.bulbMat.uniforms.uScale.value = viewH * 0.5;

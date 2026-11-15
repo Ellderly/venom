@@ -54,7 +54,7 @@ interface Tile { mesh: THREE.Mesh; tex: THREE.Texture; used: number }
 export class Ground {
   group = new THREE.Group();
   private detail = new Map<number, Tile>(); private micro = new Map<number, Tile>();
-  private frame = 0; private painter: Painter; private worker: Worker; private pending = new Map<string, { store: Map<number, Tile>; t: number; x0: number; z0: number; size: number; level: number }>();
+  private frame = 0; private painter: Painter; private worker: Worker; private ready: [string, ImageBitmap][] = []; private pending = new Map<string, { store: Map<number, Tile>; t: number; x0: number; z0: number; size: number; level: number }>();
   /** Обзорная картинка всей карты — её же показывают тактическая карта и мини-карта. */
   overview!: HTMLCanvasElement;
 
@@ -64,7 +64,7 @@ export class Ground {
     // тайлы вокруг камеры рисует фоновый поток: в основном это давало подвисание на каждый новый тайл
     this.worker = new Worker(new URL('./groundworker.ts', import.meta.url), { type: 'module' });
     this.worker.postMessage({ type: 'init', map: data });
-    this.worker.onmessage = e => this.onTile(e.data.key, e.data.bitmap);
+    this.worker.onmessage = e => this.ready.push([e.data.key, e.data.bitmap]); // в видеопамять — по одной за раз, см. update
   }
 
   /** Обзорная текстура всей карты. Рисуется один раз при загрузке. */
@@ -112,7 +112,7 @@ export class Ground {
 
   /** Запрос тайла земли у фонового потока: size — сторона в метрах (1000 или 250), t — индекс километрового тайла, из которого берутся объекты. */
   private request(store: Map<number, Tile>, id: number, x0: number, z0: number, size: number, res: number, t: number, level: number) {
-    const mp = this.map, key = `${level}:${id}`; if (this.pending.has(key) || this.pending.size >= 3) return;
+    const mp = this.map, key = `${level}:${id}`; if (this.pending.has(key) || this.pending.size >= 2) return;
     const B = mp.buildingsNear(x0 + size / 2, z0 + size / 2, size * 0.72 + 60).filter(b => mp.bH[b]); // дома, заменённые отдельными моделями, тени не дают
     this.pending.set(key, { store, t: id, x0, z0, size, level });
     this.worker.postMessage({ type: 'tile', key, x0, z0, size, res, A: mp.tileA[t], L: mp.tileL[t], B });
@@ -121,7 +121,7 @@ export class Ground {
   private onTile(key: string, bitmap: ImageBitmap) {
     const rq = this.pending.get(key); if (!rq) { bitmap.close(); return; } this.pending.delete(key);
     const { store, x0, z0, size, level } = rq, mp = this.map, m = mp.meta;
-    const tex = new THREE.Texture(bitmap as unknown as HTMLImageElement); tex.flipY = false; tex.anisotropy = this.maxAniso; tex.needsUpdate = true;
+    const tex = new THREE.Texture(bitmap as unknown as HTMLImageElement); tex.flipY = false; tex.premultiplyAlpha = true; tex.anisotropy = this.maxAniso; tex.needsUpdate = true; // картинка из фонового потока уже «умножена на прозрачность» — так она уходит в видеопамять без пересчёта на процессоре
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     const c = m.cell, q = Math.round(size / c), n = q + 1, geo = new THREE.BufferGeometry(), pos = new Float32Array(n * n * 3), uv = new Float32Array(n * n * 2), nr = new Float32Array(n * n * 3), idx = new Uint16Array(q * q * 6);
     for (let j = 0, k = 0; j < n; j++) for (let i = 0; i < n; i++, k++) {
@@ -136,7 +136,7 @@ export class Ground {
     const mesh = new THREE.Mesh(geo, groundMaterial(tex, level)); mesh.renderOrder = level;
     this.group.add(mesh);
     store.set(rq.t, { mesh, tex, used: this.frame });
-    this.drop(store, store === this.detail ? (2 * this.q.detailRadius + 3) ** 2 + 8 : 60);
+    this.drop(store, store === this.detail ? (2 * this.q.detailRadius + 3) ** 2 + 4 : 40);
   }
   private drop(store: Map<number, Tile>, cap: number) {
     if (store.size > cap) for (const [t, d] of store) if (d.used < this.frame - 120) {
@@ -148,6 +148,7 @@ export class Ground {
   /** Раз в кадр: держим детальные тайлы вокруг точки взгляда, не более одного нового за кадр. */
   update(tx: number, tz: number, camDist: number) {
     this.frame++;
+    if (this.ready.length && this.frame % 3 === 0) { const [key, bitmap] = this.ready.shift()!; this.onTile(key, bitmap); } // не больше одной новой текстуры за три кадра — без пачек и рывков
     const mp = this.map, m = mp.meta, R = camDist > 9000 ? -1 : this.q.detailRadius + (camDist > 2500 ? 1 : 0);
     const ci = Math.floor((tx - m.x0) / TILE), cj = Math.floor((tz - m.z0) / TILE);
     let best = -1, bestD = 1e9;

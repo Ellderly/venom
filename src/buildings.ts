@@ -18,7 +18,7 @@ export class Buildings {
     for (let i = 0; i < q.workers; i++) {
       const w = new Worker(new URL('./tileworker.ts', import.meta.url), { type: 'module' });
       w.postMessage({ type: 'init', bPts: map.bPts, bStart: map.bStart, bH: map.bH, bType: map.bType, hgt: map.hgt, hNx: map.hNx, hNz: map.hNz, x0: map.meta.x0, z0: map.meta.z0, cell: map.meta.cell, roofDetail: q.roofDetail });
-      w.onmessage = e => { this.busy[i]--; this.onTile(e.data); };
+      w.onmessage = e => { this.busy[i]--; this.ready.push(e.data); }; // готовые тайлы ждут в очереди: в видеопамять — по одному за кадр
       this.workers.push(w); this.busy.push(0);
     }
     this.mat = new THREE.ShaderMaterial({
@@ -108,8 +108,10 @@ export class Buildings {
     for (let k = 0; k < tm.sorted.length; k++) if (this.map.bDamage[tm.sorted[k]] > 0) this.hideAt(tm, k);
   }
 
+  private ready: any[] = [];
   update(cx: number, cz: number, camDist: number) {
     const mp = this.map, q = this.q;
+    if (this.ready.length) this.onTile(this.ready.shift());
     const R = Math.min(q.viewDist, 1500 + camDist * 1.6), lod = camDist > 14000 ? 0 : q.lodDist;
     const ci = (cx - mp.meta.x0) / TILE - 0.5, cj = (cz - mp.meta.z0) / TILE - 0.5, rt = R / TILE;
     const want: [number, number][] = [];
@@ -117,7 +119,7 @@ export class Buildings {
       for (let i = Math.max(0, Math.floor(ci - rt)); i <= Math.min(mp.tilesX - 1, Math.ceil(ci + rt)); i++) {
         const d = Math.hypot(i - ci, j - cj); if (d > rt) continue;
         const t = j * mp.tilesX + i, tm = this.tiles.get(t);
-        if (tm) tm.mesh.geometry.setDrawRange(0, d * TILE > lod ? tm.bigIdx : tm.idxCount);
+        if (tm) { tm.mesh.visible = true; tm.mesh.geometry.setDrawRange(0, d * TILE > lod ? tm.bigIdx : tm.idxCount); }
         else if (!this.pending.has(t) && mp.tileB[t].length) want.push([d, t]);
       }
     want.sort((a, b) => a[0] - b[0]);
@@ -129,8 +131,10 @@ export class Buildings {
     let tris = 0;
     for (const [t, tm] of this.tiles) {
       const i = t % mp.tilesX, j = (t / mp.tilesX) | 0;
-      if (Math.hypot(i - ci, j - cj) > rt * 1.25 + 1) { this.group.remove(tm.mesh); tm.mesh.geometry.dispose(); this.tiles.delete(t); }
-      else tris += tm.mesh.geometry.drawRange.count / 3;
+      const dd = Math.hypot(i - ci, j - cj);
+      if (dd > rt * 1.25 + 1) { // вне зоны: прячем, а выгружаем только когда накопилось много — иначе приближение и отдаление камеры гоняет одни и те же тайлы туда-сюда
+        if (this.tiles.size > q.workers * 110 || dd > rt * 3 + 6) { this.group.remove(tm.mesh); tm.mesh.geometry.dispose(); this.tiles.delete(t); } else tm.mesh.visible = false;
+      } else if (tm.mesh.visible) tris += Math.min(tm.idxCount, tm.mesh.geometry.drawRange.count) / 3;
     }
     this.stats.tiles = this.tiles.size; this.stats.tris = tris;
   }

@@ -48,7 +48,7 @@ let env: Env, ground: Ground, buildings: Buildings, cc: CityCamera, fx: FX, dest
 let shadows: Shadows | null = null, post: Post | null = null;
 let session: Session | null = null, worlds: Worlds;
 let players: Player[] = [];
-let dyn = 1; // динамическое разрешение
+let dyn = 1, dynLow = 0, dynHigh = 0; // динамическое разрешение
 
 interface Drone { L: Launch; mesh: THREE.Group; prop: THREE.Object3D | null; glow: THREE.Object3D | null; label: HTMLElement; row: HTMLElement; s: State; eta: number; spin: number }
 const drones = new Map<number, Drone>();
@@ -630,6 +630,7 @@ window.addEventListener('blur', () => showScore(false));
 // ---------- главный цикл ----------
 const v3 = new THREE.Vector3(), fwd = new THREE.Vector3(), heard: Heard[] = [];
 const tacData: TacData = { drones: [], hits, cam: { x: 0, z: 0, yaw: 0, dist: 0 }, aim: null, cursor: null, guns: [], zones: [], targets: [], planned: [] };
+let worst = 0, prevMs = performance.now(); // самый долгий кадр за последние полсекунды — по нему видны рывки
 let last = performance.now(), fpsAcc = 0, fpsN = 0, fpsT = 0, frameNo = 0;
 function frame(nowMs: number) {
   requestAnimationFrame(frame);
@@ -689,10 +690,10 @@ function frame(nowMs: number) {
     tacData.aim = u && launchUI.step === 1 ? { tx: launchUI.tx, tz: launchUI.tz, rings: gameMode !== 'sandbox' ? (launchUI.range ? [{ r: launchUI.range, label: `точка появления · ${launchUI.range / 1000} км` }] : []) : launchUI.mode ? [{ r: launchUI.mode * u.speed, label: `точка появления · ${fmt(launchUI.mode)}` }] : [15, 60, 180].map(s => ({ r: s * u.speed, label: fmt(s) })) } : null;
     if (tac.open) { tac.draw(tacData); $('tacInfo').textContent = `· целей в воздухе: ${drones.size} · попаданий: ${hits.length}`; } else mini.draw(tacData);
   }
-  fpsAcc += dt; fpsN++; fpsT += dt;
+  fpsAcc += dt; fpsN++; fpsT += dt; worst = Math.max(worst, nowMs - prevMs); prevMs = nowMs;
   if (fpsT > 0.5) {
     const fps = fpsN / fpsAcc, i = renderer.info.render;
-    if (S.perf) $('perf').textContent = `${fps.toFixed(0)} к/с · ${(1000 / fps).toFixed(1)} мс · вызовов ${i.calls} · треуг. ${(i.triangles / 1e6).toFixed(2)} млн\nтайлов ${buildings.stats.tiles} · частиц ${fx.count} · деревьев ${trees.count} · обломков ${destr.debris} · разрешение ${Math.round(dyn * 100)}% · ${Q.name}`;
+    if (S.perf) $('perf').textContent = `${fps.toFixed(0)} к/с · ${(1000 / fps).toFixed(1)} мс · худший кадр ${worst.toFixed(0)} мс · вызовов ${i.calls} · треуг. ${(i.triangles / 1e6).toFixed(2)} млн\nтайлов ${buildings.stats.tiles} · частиц ${fx.count} · деревьев ${trees.count} · обломков ${destr.debris} · разрешение ${Math.round(dyn * 100)}% · ${Q.name}`;
     if (session) { // очки и доступность юнитов по цене
       const game = gameMode !== 'sandbox', pts = myPoints();
       renderOp();
@@ -700,9 +701,12 @@ function frame(nowMs: number) {
       document.querySelectorAll<HTMLElement>('#arsenal .tile, #quick .q.full').forEach(t => t.classList.toggle('poor', game && (UNITS[t.dataset.unit ?? '']?.cost ?? 0) > pts));
     }
     $('clock').textContent = env.clock(); $('tspeed').textContent = env.speed ? `×${env.speed}` : 'пауза';
-    const nd = fps < 40 ? Math.max(0.5, dyn - 0.1) : fps > 57 ? Math.min(1, dyn + 0.05) : dyn;
-    if (nd !== dyn && document.hasFocus() && !location.search.includes('nodyn')) { dyn = nd; resize(); }
-    fpsAcc = fpsN = fpsT = 0;
+    // динамическое разрешение — только на слабых пресетах и только при долгой просадке: каждое изменение пересоздаёт буферы кадра (рывок и мерцание)
+    if (Q.dynRes && document.hasFocus() && !location.search.includes('nodyn')) {
+      if (fps < 35) { dynLow++; dynHigh = 0; } else if (fps > 57) { dynHigh++; dynLow = 0; } else dynLow = dynHigh = 0;
+      if (dynLow >= 4 && dyn > 0.5) { dyn = Math.max(0.5, dyn - 0.15); dynLow = 0; resize(); } else if (dynHigh >= 12 && dyn < 1) { dyn = Math.min(1, dyn + 0.15); dynHigh = 0; resize(); }
+    }
+    fpsAcc = fpsN = fpsT = 0; worst = 0;
   }
 }
 
