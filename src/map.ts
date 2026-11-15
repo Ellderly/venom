@@ -1,7 +1,17 @@
 // Данные карты: здания, площадные объекты, линии, рельеф. Всё в локальных метрах (x — восток, z — юг).
-export interface Meta { x0: number; x1: number; z0: number; z1: number; cell: number; buildings: number; hmin: number; hmax: number; attribution: string }
+export interface Meta { lon0: number; lat0: number; x0: number; x1: number; z0: number; z1: number; cell: number; buildings: number; hmin: number; hmax: number; attribution: string }
 
 export const TILE = 1000;
+export const ROAD_W = [24, 17, 13, 10, 7.5, 4.5]; // ширина дорог по классам, м
+
+/** Мост: цепочка отрезков OSM с признаком «мост», склеенная в одну линию. Полотно поднято над землёй и водой. */
+export interface Bridge {
+  id: number; cls: number; rail: boolean; w: number; len: number;
+  pts: Float32Array;      // x, z вершин
+  s: Float32Array;        // длина пути до вершины
+  y: Float32Array;        // высота полотна в вершине
+  cuts: [number, number][]; // разрушенные участки [от, до] по длине пути
+}
 const HASH = 100; // ячейка пространственного индекса зданий, м
 
 export class MapData {
@@ -16,6 +26,9 @@ export class MapData {
   /** Занятость точки в разрушаемом здании; null — здание ещё целое. Назначается модулем разрушений. */
   solid: ((b: number, x: number, y: number, z: number) => boolean | null) | null = null;
   private hashNx = 0; private hashNz = 0; private hash: (number[] | undefined)[] = [];
+  /** Препятствия-цилиндры (знаковые объекты): цель, задевшая их, взрывается. */
+  obstacles: { x: number; z: number; r: number; top: number; name: string }[] = [];
+  bridges: Bridge[] = []; private bHash = new Map<number, number[]>(); /** Линии, вошедшие в 3D-мосты: на земле не рисуются. */ lineOnBridge!: Uint8Array;
 
   async load(base: string, progress: (p: number, label: string) => void) {
     const get = async (n: string) => (await fetch(base + n)).arrayBuffer();
@@ -46,7 +59,7 @@ export class MapData {
     this.lStart = new Uint32Array(buf, o, this.lN + 1); o += (this.lN + 1) * 4;
     this.lCls = new Uint8Array(buf, o, this.lN);
     progress(0.7, 'Индексация');
-    this.index();
+    this.index(); this.buildBridges();
   }
 
   private index() {
@@ -83,6 +96,67 @@ export class MapData {
       bin(bb, this.tileL, l, TILE, this.tilesX, this.tilesZ);
     }
   }
+
+  /** Склеивает отрезки мостов в цепочки и задаёт профиль высоты полотна. Результат одинаков у всех игроков. */
+  private buildBridges() {
+    const p = this.lPts, key = (i: number) => Math.round(p[i * 2] * 2) * 200003 + Math.round(p[i * 2 + 1] * 2);
+    this.lineOnBridge = new Uint8Array(this.lN);
+    const ends = new Map<number, number[]>(), ids: number[] = [];
+    for (let l = 0; l < this.lN; l++) {
+      const c = this.lCls[l] & 0x3f; if (!(this.lCls[l] & 0x40) || (c > 4 && c !== 8) || this.lStart[l + 1] - this.lStart[l] < 2) continue;
+      ids.push(l); for (const e of [this.lStart[l], this.lStart[l + 1] - 1]) { const k = key(e); (ends.get(k) ?? ends.set(k, []).get(k)!).push(l); }
+    }
+    const used = new Set<number>();
+    const other = (l: number, k: number) => { const a = ends.get(k)!; if (a.length !== 2) return -1; const o = a[0] === l ? a[1] : a[0]; return used.has(o) || ((this.lCls[o] & 0x3f) === 8) !== ((this.lCls[l] & 0x3f) === 8) ? -1 : o; };
+    for (const l0 of ids) {
+      if (used.has(l0)) continue; used.add(l0);
+      const lines: [number, boolean][] = [[l0, false]]; // [линия, перевёрнута]
+      for (const dir of [1, 0]) { // наращиваем вперёд, затем назад
+        for (;;) {
+          const [l, rev] = dir ? lines[lines.length - 1] : lines[0];
+          const tail = dir !== (rev ? 1 : 0) ? this.lStart[l + 1] - 1 : this.lStart[l], k = key(tail), o = other(l, k); if (o < 0) break;
+          used.add(o); const startsHere = key(this.lStart[o]) === k;
+          if (dir) lines.push([o, !startsHere]); else lines.unshift([o, startsHere]);
+        }
+      }
+      const xs: number[] = []; let cls = 9, rail = false;
+      for (const [l, rev] of lines) {
+        const a = this.lStart[l], e = this.lStart[l + 1], c = this.lCls[l] & 0x3f; if (c === 8) rail = true; else cls = Math.min(cls, c);
+        for (let i = 0; i < e - a; i++) { const q = rev ? e - 1 - i : a + i; if (i === 0 && xs.length) continue; xs.push(p[q * 2], p[q * 2 + 1]); }
+      }
+      const n = xs.length / 2, pts = new Float32Array(xs), s = new Float32Array(n), y = new Float32Array(n);
+      for (let i = 1; i < n; i++) s[i] = s[i - 1] + Math.hypot(pts[i * 2] - pts[i * 2 - 2], pts[i * 2 + 1] - pts[i * 2 - 1]);
+      const len = s[n - 1]; if (len < 30) continue; // совсем короткие остаются нарисованными на земле
+      const yA = this.heightAt(pts[0], pts[1]), yB = this.heightAt(pts[n * 2 - 2], pts[n * 2 - 1]);
+      const H = Math.min(24, Math.max(5.5, len * 0.045)), ramp = Math.min(140, len * 0.32);
+      const sm = (t: number) => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t); };
+      for (let i = 0; i < n; i++) y[i] = Math.max(yA + (yB - yA) * s[i] / len + H * sm(s[i] / ramp) * sm((len - s[i]) / ramp), this.heightAt(pts[i * 2], pts[i * 2 + 1]) + 0.4);
+      const b: Bridge = { id: this.bridges.length, cls: rail ? 8 : cls, rail, w: rail ? 6.5 : ROAD_W[cls] + 3, len, pts, s, y, cuts: [] };
+      this.bridges.push(b); for (const [l] of lines) this.lineOnBridge[l] = 1;
+      for (let i = 0; i < n - 1; i++) { // пространственный индекс отрезков, ячейка 200 м
+        const x0 = Math.min(pts[i * 2], pts[i * 2 + 2]) - b.w, x1 = Math.max(pts[i * 2], pts[i * 2 + 2]) + b.w, z0 = Math.min(pts[i * 2 + 1], pts[i * 2 + 3]) - b.w, z1 = Math.max(pts[i * 2 + 1], pts[i * 2 + 3]) + b.w;
+        for (let cz = Math.floor(z0 / 200); cz <= Math.floor(z1 / 200); cz++) for (let cx = Math.floor(x0 / 200); cx <= Math.floor(x1 / 200); cx++) { const k = cz * 4096 + cx; (this.bHash.get(k) ?? this.bHash.set(k, []).get(k)!).push(b.id * 4096 + i); }
+      }
+    }
+  }
+
+  /** Ближайший мост над точкой: [мост, длина пути, высота полотна] либо null. pad расширяет полотно. */
+  bridgeAt(x: number, z: number, pad = 0): [Bridge, number, number] | null {
+    const list = this.bHash.get(Math.floor(z / 200) * 4096 + Math.floor(x / 200)); if (!list) return null;
+    let best: [Bridge, number, number] | null = null, bd = 1e9;
+    for (const e of list) {
+      const b = this.bridges[(e / 4096) | 0], i = e % 4096, ax = b.pts[i * 2], az = b.pts[i * 2 + 1], dx = b.pts[i * 2 + 2] - ax, dz = b.pts[i * 2 + 3] - az;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1))), d = Math.hypot(ax + dx * t - x, az + dz * t - z);
+      if (d > b.w / 2 + pad || d >= bd) continue;
+      const s = b.s[i] + (b.s[i + 1] - b.s[i]) * t; if (b.cuts.some(c => s > c[0] && s < c[1])) continue;
+      bd = d; best = [b, s, b.y[i] + (b.y[i + 1] - b.y[i]) * t];
+    }
+    return best;
+  }
+  /** Высота полотна моста над точкой; -1e9, если моста нет. */
+  deckAt(x: number, z: number) { const b = this.bridgeAt(x, z); return b ? b[2] : -1e9; }
+  /** Верхняя поверхность для камеры и курсора: рельеф или мост. */
+  surfaceAt(x: number, z: number) { return Math.max(this.heightAt(x, z), this.deckAt(x, z)); }
 
   tileIndex(x: number, z: number) {
     const i = Math.floor((x - this.meta.x0) / TILE), j = Math.floor((z - this.meta.z0) / TILE);

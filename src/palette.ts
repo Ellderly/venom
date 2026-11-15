@@ -23,3 +23,18 @@ export const ROOFS: number[][][] = [
 
 export function hash(n: number) { n = Math.imul(n ^ (n >>> 15), 2246822519); n = Math.imul(n ^ (n >>> 13), 3266489917); return (n ^ (n >>> 16)) >>> 0; }
 
+
+/** Стиль фасада по типу здания, высоте (м) и хэшу. Один и тот же для целого дома и для его вокселей.
+ *  0 обычный · 1 частный дом · 2 панельный · 3 кирпичный («сталинка») · 4 промзона · 5 гаражи · 6 стекло · 7 школа/больница · 8 храм */
+export function facadeStyle(type: number, h: number, hs: number) {
+  switch (type) {
+    case 1: return 1;
+    case 2: return h >= 19 || (hs >>> 20) % 3 ? 2 : 3;
+    case 3: return 4;
+    case 4: return 5;
+    case 5: return h >= 18 || (hs >>> 20) % 2 ? 6 : 0;
+    case 6: return 7;
+    case 7: return 8;
+    default: return h > 30 ? 2 : 0;
+  }
+}

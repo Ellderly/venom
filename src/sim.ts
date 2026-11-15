@@ -44,7 +44,9 @@ export function planLaunch(L: Launch, map: MapData) {
     trajectory(L, map, t, s);
     const g = map.heightAt(s.x, s.z), b = map.buildingAt(s.x, s.z);
     const hitB = b >= 0 && (map.solid?.(b, s.x, s.y, s.z) ?? s.y <= g + map.bH[b] / 10);
-    if (hitB || s.y <= g + 0.3) { L.impactT = t; L.ix = s.x; L.iy = Math.max(s.y, g); L.iz = s.z; L.building = hitB ? b : -1; return; }
+    const dk = map.deckAt(s.x, s.z), hitD = s.y <= dk + 0.3 && s.y >= dk - 4; // полотно моста
+    const hitO = map.obstacles.some(o => s.y < o.top && (s.x - o.x) ** 2 + (s.z - o.z) ** 2 < o.r * o.r);
+    if (hitB || hitD || hitO || s.y <= g + 0.3) { L.impactT = t; L.ix = s.x; L.iy = Math.max(s.y, g); L.iz = s.z; L.building = hitB ? b : -1; return; }
   }
   trajectory(L, map, L.dur, s); L.impactT = L.dur; L.ix = s.x; L.iy = map.heightAt(s.x, s.z); L.iz = s.z; L.building = -1;
 }

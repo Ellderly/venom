@@ -3,13 +3,13 @@
 import * as THREE from 'three';
 import { MapData } from './map';
 import { FX } from './fx';
-import { WALLS, ROOFS, hash } from './palette';
+import { WALLS, ROOFS, hash, facadeStyle } from './palette';
 
 interface Vox {
   b: number; ox: number; oz: number; cos: number; sin: number; base: number;
   s: number; sy: number; nx: number; ny: number; nz: number; x0: number; z0: number;
   cells: Uint8Array;          // 0 пусто, 1 целый, 2 закопчённый
-  total: number; left: number; mesh: THREE.Mesh; wall: number[]; roof: number[]; seed: number;
+  total: number; left: number; mesh: THREE.Mesh; wall: number[]; roof: number[]; seed: number; style: number;
 }
 
 function hash3(x: number, y: number, z: number) { let n = Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791); n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; }
@@ -62,7 +62,7 @@ export class Destruction {
     const hs = hash(b + 1), t = mp.bType[b], w = WALLS[t][hs % WALLS[t].length], rf = ROOFS[t][(hs >>> 8) % ROOFS[t].length], sh = 0.92 + ((hs >>> 16) % 16) / 100;
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.mat); mesh.frustumCulled = false; this.group.add(mesh);
     const v: Vox = { b, ox, oz, cos, sin, base: mp.heightAt(ox, oz), s: (x1 - x0) / nx, sy, nx, ny, nz, x0, z0, cells, total, left: total, mesh,
-      wall: [w[0] * sh, w[1] * sh, w[2] * sh], roof: rf, seed: 1 + hs % 254 };
+      wall: [w[0] * sh, w[1] * sh, w[2] * sh], roof: rf, seed: 1 + hs % 254, style: facadeStyle(t, h, hs) };
     (v as any).sz = (z1 - z0) / nz;
     this.vox.set(b, v); return v;
   }
@@ -79,7 +79,7 @@ export class Destruction {
       const r = 0.85 + 0.3 * hash3(i, j, k), dark = 1 - 0.8 * soot;
       for (const q of c) {
         const [wx, wz] = world(q[0], q[2]); pos.push(wx, v.base + q[1], wz);
-        uv.push(nl[0] !== 0 ? q[2] : q[0], q[1]); nrm.push(Math.round(nw[0] * 127), Math.round(nw[1] * 127), Math.round(nw[2] * 127), 0);
+        uv.push(nl[0] !== 0 ? q[2] : q[0], q[1]); nrm.push(Math.round(nw[0] * 127), Math.round(nw[1] * 127), Math.round(nw[2] * 127), kind === 0 ? v.style * 12 : 0); // дом после попадания сохраняет свой фасад
         if (kind === 0) col.push(v.wall[0] * dark, v.wall[1] * dark, v.wall[2] * dark, soot > 0.3 ? 0 : v.seed);     // фасад с окнами
         else if (kind === 1) col.push(v.roof[0] * dark, v.roof[1] * dark, v.roof[2] * dark, 255);                    // крыша
         else col.push(118 * r * dark, 112 * r * dark, 104 * r * dark, 0);                                             // излом: бетон и кирпич
@@ -114,10 +114,14 @@ export class Destruction {
     if (this.deb.instanceColor) this.deb.instanceColor.needsUpdate = true;
   }
 
+  /** Обломок снаружи модуля (мосты). */
+  chunk(x: number, y: number, z: number, vx: number, vy: number, vz: number, size: number, r: number, g: number, b: number) { this.spawn(x, y, z, vx, vy, vz, size, r, g, b); }
+
   /** Взрыв в точке. Возвращает [повреждено зданий, обрушено кубиков] для ленты событий. */
   blast(x: number, y: number, z: number, radius: number, hide: (b: number) => void) {
     let hitB = 0, fell = 0, budget = Math.min(260, this.cap >> 2);
     for (const b of this.map.buildingsNear(x, z, radius + 90)) {
+      if (!this.map.bH[b]) continue; // здание заменено отдельной моделью
       if (!this.vox.has(b)) { // вокселизуем только здания, которые взрыв действительно задевает
         const a = this.map.bStart[b], e = this.map.bStart[b + 1], p = this.map.bPts; let near = false;
         for (let i = a, q = e - 1; i < e && !near; q = i++) { // расстояние до стен

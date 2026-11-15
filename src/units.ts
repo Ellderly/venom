@@ -6,10 +6,10 @@ export const SIDE_NAME: Record<Side, string> = { attack: 'Атака', defense: 
 export interface Category { id: string; side: Side; name: string; hint: string }
 export const CATEGORIES: Category[] = [
   { id: 'drone', side: 'attack', name: 'Дроны', hint: 'Барражирующие боеприпасы' },
-  { id: 'cruise', side: 'attack', name: 'Крылатые ракеты', hint: 'Низколетящие, огибают рельеф' },
+  { id: 'cruise', side: 'attack', name: 'Крылатые ракеты', hint: 'Низколетящие' },
   { id: 'ballistic', side: 'attack', name: 'Баллистика', hint: 'Быстрые, с большой высоты' },
   { id: 'special', side: 'attack', name: 'Особые', hint: 'Ложные цели, ядерные заряды' },
-  { id: 'short', side: 'defense', name: 'Ближняя', hint: 'Огневые группы, зенитные установки' },
+  { id: 'short', side: 'defense', name: 'Ближняя', hint: 'Огневые группы, зенитки' },
   { id: 'medium', side: 'defense', name: 'Средняя', hint: 'IRIS-T, NASAMS' },
   { id: 'long', side: 'defense', name: 'Дальняя', hint: 'Patriot, С-300' },
   { id: 'radar', side: 'defense', name: 'Радары', hint: 'Обнаружение целей' },

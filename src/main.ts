@@ -16,16 +16,24 @@ import { S, saveSettings, isKey, keyName, applyUiScale } from './settings';
 import { $, el, esc, fmt, modal, Modal, topModal, closeTopModal, showHelp, showSettings } from './ui';
 import { CardView } from './card';
 import { TacMap, Minimap, TacData } from './tacmap';
+import { Trees } from './trees';
+import { Bridges } from './bridges';
+import { Shadows } from './shadows';
+import { Post } from './post';
+import { Landmarks } from './landmarks';
 
 declare const __BUILD__: string;
 
 const qName = loadQualityName(), Q = PRESETS[qName];
 const canvas = $<HTMLCanvasElement>('view');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: qName !== 'low', powerPreference: 'high-performance' });
+const usePost = Q.msaa > 0 || Q.bloom;
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !usePost && qName !== 'low', powerPreference: 'high-performance' });
+renderer.info.autoReset = false; // кадр состоит из нескольких проходов — счётчики сбрасываем сами
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace; // свои шейдеры сами переводят цвет в sRGB
 const scene = new THREE.Scene();
 const map = new MapData(), sound = new Sound(); sound.volume = S.volume;
-let env: Env, ground: Ground, buildings: Buildings, cc: CityCamera, fx: FX, destr: Destruction, tac: TacMap, mini: Minimap;
+let env: Env, ground: Ground, buildings: Buildings, cc: CityCamera, fx: FX, destr: Destruction, tac: TacMap, mini: Minimap, trees: Trees, bridges: Bridges, landmarks: Landmarks;
+let shadows: Shadows | null = null, post: Post | null = null;
 let session: Session | null = null, worlds: Worlds;
 let players: Player[] = [];
 let dyn = 1; // динамическое разрешение
@@ -42,7 +50,7 @@ const mySide = (): Side | null => me()?.side ?? null;
 
 function resize() {
   const w = innerWidth, h = innerHeight;
-  renderer.setPixelRatio(Math.min(Math.max(devicePixelRatio, 1), Q.pixelRatio) * dyn); renderer.setSize(w, h, false); cc?.resize(w, h);
+  renderer.setPixelRatio(Math.min(Math.max(devicePixelRatio, 1), Q.pixelRatio) * dyn); renderer.setSize(w, h, false); cc?.resize(w, h); post?.resize();
 }
 window.addEventListener('resize', resize);
 
@@ -116,18 +124,20 @@ function addDrone(L: Launch) {
 
 function impact(L: Launch, silent = false) {
   const u = UNITS[L.unit];
-  const [hit, fell] = destr.blast(L.ix, L.iy, L.iz, 1.6 * Math.cbrt(u.tntKg), b => buildings.hide(b));
+  const rad = 1.6 * Math.cbrt(u.tntKg), [hit, fell] = destr.blast(L.ix, L.iy, L.iz, rad, b => buildings.hide(b)), br = bridges.blast(L.ix, L.iy, L.iz, rad);
+  const onGround = !hit && !br && L.iy - map.heightAt(L.ix, L.iz) < 2;
   hits.push({ x: L.ix, z: L.iz });
-  if (silent) { fx.smolder(L.ix, L.iy, L.iz, u.tntKg); return; }
-  fx.explode(L.ix, L.iy, L.iz, u.tntKg);
+  if (silent) { fx.smolder(L.ix, L.iy, L.iz, u.tntKg); if (onGround) fx.scorch(L.ix, L.iy, L.iz, Math.cbrt(u.tntKg) * 3.6); return; }
+  fx.explode(L.ix, L.iy, L.iz, u.tntKg, onGround);
   const dist = cc.cam.position.distanceTo(new THREE.Vector3(L.ix, L.iy, L.iz));
   sound.explosion(dist, u.tntKg, fell > 40, u.sounds); cc.shake = Math.max(cc.shake, Math.min(6, 900 / Math.max(60, dist)));
-  feed(hit ? `Попадание: ${u.name} — повреждено зданий: ${hit}` + (fell > 40 ? ', часть конструкций обрушилась' : '') : `Попадание: ${u.name} — открытая местность`);
+  const lm = map.obstacles.find(o => (L.ix - o.x) ** 2 + (L.iz - o.z) ** 2 < (o.r + 3) ** 2 && L.iy < o.top + 3);
+  feed(lm && !hit ? `Попадание: ${u.name} — ${lm.name}` : br ? `Попадание: ${u.name} — пролёт моста обрушен` : hit ? `Попадание: ${u.name} — повреждено зданий: ${hit}` + (fell > 40 ? ', часть конструкций обрушилась' : '') : `Попадание: ${u.name} — открытая местность`);
   if (session && L.pid === session.me) session.send({ type: 'hit', id: L.id, buildings: hit });
 }
 
 function removeDrone(d: Drone) { scene.remove(d.mesh); d.label.remove(); d.row.remove(); drones.delete(d.L.id); if (!drones.size) $('targets').classList.add('hidden'); }
-function resetDamage() { map.bDamage.fill(0); destr.reset(); buildings.reset(); fx.clear(); hits.length = 0; for (const d of [...drones.values()]) removeDrone(d); }
+function resetDamage() { map.bDamage.fill(0); destr.reset(); buildings.reset(); bridges.reset(); fx.clear(); hits.length = 0; for (const d of [...drones.values()]) removeDrone(d); }
 
 function setPlayers(list: Player[], quiet = false) {
   const old = players, was = mySide(); players = list;
@@ -398,7 +408,7 @@ function frame(nowMs: number) {
   cc.update(dt); const t = cc.target;
   env.update(dt, scene, cc.cam);
   U.uFogD.value = 1 / Math.max(45000, t.dist * 3.2);
-  ground.update(t.x, t.z, t.dist); buildings.update(t.x, t.z, t.dist);
+  ground.update(t.x, t.z, t.dist); buildings.update(t.x, t.z, t.dist); trees.update(t.x, t.z, t.dist, canvas.height);
   heard.length = 0; tacData.drones.length = 0;
   if (session) {
     const now = session.now(), filter = $<HTMLSelectElement>('tgFilter').value;
@@ -430,8 +440,8 @@ function frame(nowMs: number) {
   }
   sound.engines(heard);
   if (marker.visible) marker.scale.setScalar(Math.max(12, t.dist * 0.018) * (1 + 0.08 * Math.sin(nowMs / 150)));
-  destr.update(dt); fx.update(dt);
-  if (!tac.open) renderer.render(scene, cc.cam);
+  destr.update(dt); landmarks.update(dt); fx.update(dt); fx.lights(t.x, t.y, t.z);
+  if (!tac.open) { renderer.info.reset(); shadows?.render(renderer, t); if (post) post.render(scene, cc.cam); else renderer.render(scene, cc.cam); }
   cards.render(dt, nowMs);
   if (session && (tac.open || (S.minimap && frameNo % 6 === 0))) {
     const u = launchUI.armed; tacData.cam.x = t.x; tacData.cam.z = t.z; tacData.cam.yaw = cc.yawNow; tacData.cam.dist = t.dist; tacData.cursor = tac.cursor;
@@ -441,7 +451,7 @@ function frame(nowMs: number) {
   fpsAcc += dt; fpsN++; fpsT += dt;
   if (fpsT > 0.5) {
     const fps = fpsN / fpsAcc, i = renderer.info.render;
-    if (S.perf) $('perf').textContent = `${fps.toFixed(0)} к/с · ${(1000 / fps).toFixed(1)} мс · вызовов ${i.calls} · треуг. ${(i.triangles / 1e6).toFixed(2)} млн\nтайлов ${buildings.stats.tiles} · частиц ${fx.count} · обломков ${destr.debris} · разрешение ${Math.round(dyn * 100)}% · ${Q.name}`;
+    if (S.perf) $('perf').textContent = `${fps.toFixed(0)} к/с · ${(1000 / fps).toFixed(1)} мс · вызовов ${i.calls} · треуг. ${(i.triangles / 1e6).toFixed(2)} млн\nтайлов ${buildings.stats.tiles} · частиц ${fx.count} · деревьев ${trees.count} · обломков ${destr.debris} · разрешение ${Math.round(dyn * 100)}% · ${Q.name}`;
     $('clock').textContent = env.clock(); $('tspeed').textContent = env.speed ? `×${env.speed}` : 'пауза';
     const nd = fps < 40 ? Math.max(0.5, dyn - 0.1) : fps > 57 ? Math.min(1, dyn + 0.05) : dyn;
     if (nd !== dyn && document.hasFocus() && !location.search.includes('nodyn')) { dyn = nd; resize(); }
@@ -454,13 +464,17 @@ async function boot() {
   const bar = (p: number, label: string) => { $('loadBar').style.width = `${p * 100}%`; $('loadText').textContent = label; };
   const ws = worldStore();
   await map.load('./data/', bar);
-  env = new Env(scene); cc = new CityCamera(canvas, map); cc.onClick = (px, py) => { const p = cc.pick(px, py); if (p) clickWorld(p.x, p.z); else sound.unlock(); };
+  env = new Env(scene, Q.clouds); cc = new CityCamera(canvas, map); cc.onClick = (px, py) => { const p = cc.pick(px, py); if (p) clickWorld(p.x, p.z); else sound.unlock(); };
   ground = new Ground(map, Q, renderer.capabilities.getMaxAnisotropy());
   bar(0.75, 'Отрисовка карты');
   await ground.buildOverview(p => bar(0.75 + p * 0.23, 'Отрисовка карты'));
+  landmarks = new Landmarks(map); // до зданий: убирает дома OSM под моделями
   buildings = new Buildings(map, Q); fx = new FX(Q.particles); destr = new Destruction(map, buildings.mat, fx, Q.voxel, Q.debris);
-  scene.add(ground.group, buildings.group, destr.group, fx.group, marker, aimLine);
-  tac = new TacMap($('tac'), ground.overview, map.meta, (x, z) => { if (!clickWorld(x, z)) { cc.flyTo(x, z); toggleTac(false); } });
+  trees = new Trees(map, Q); bridges = new Bridges(map, fx, destr);
+  scene.add(ground.group, buildings.group, landmarks.group, bridges.group, trees.group, destr.group, trees.lampGroup, fx.group, marker, aimLine);
+  if (Q.shadow) { shadows = new Shadows(Q.shadow); shadows.casters.push(buildings.group, landmarks.group, bridges.group, trees.group, destr.group); }
+  if (usePost) post = new Post(renderer, Q.msaa, Q.bloom);
+  tac = new TacMap($('tac'), ground.overview, map.meta, landmarks.marks, (x, z) => { if (!clickWorld(x, z)) { cc.flyTo(x, z); toggleTac(false); } });
   mini = new Minimap($('mini').querySelector('canvas')!, ground.overview, map.meta, (x, z) => cc.flyTo(x, z));
   worlds = await ws;
   resize(); initMenu();
@@ -473,7 +487,7 @@ async function boot() {
   $('btnCancel').onclick = () => arm(null); $('arMin').onclick = () => $('arsenal').classList.toggle('min');
   $<HTMLInputElement>('arSearch').oninput = renderArsenal;
   syncLock();
-  (window as any).venom = { map, cc, env, drones, buildings, ground, fx, destr, arm, clickWorld, UNITS, S, scene, renderer, get session() { return session; }, get players() { return players; } };
+  (window as any).venom = { U, map, cc, env, drones, buildings, ground, fx, destr, trees, bridges, landmarks, arm, clickWorld, UNITS, S, scene, renderer, get session() { return session; }, get players() { return players; } };
   requestAnimationFrame(frame);
 }
 boot().catch(e => { $('loadText').textContent = 'Ошибка загрузки: ' + (e?.message ?? e); console.error(e); });

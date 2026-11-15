@@ -52,8 +52,8 @@ export class CityCamera {
     const tmax = Math.min(400000, (o.y - this.map.meta.hmin + 5) / -d.y);
     for (let i = 0; i < 400; i++) {
       p.copy(o).addScaledVector(d, t);
-      const g = this.map.heightAt(p.x, p.z);
-      if (p.y <= g) { let a = prev, b = t; for (let k = 0; k < 12; k++) { const m = (a + b) / 2; p.copy(o).addScaledVector(d, m); if (p.y > this.map.heightAt(p.x, p.z)) a = m; else b = m; } return p; }
+      const g = this.map.surfaceAt(p.x, p.z);
+      if (p.y <= g) { let a = prev, b = t; for (let k = 0; k < 12; k++) { const m = (a + b) / 2; p.copy(o).addScaledVector(d, m); if (p.y > this.map.surfaceAt(p.x, p.z)) a = m; else b = m; } return p; }
       if (t >= tmax) break;
       prev = t; t = Math.min(tmax, t + Math.max(4, (p.y - g) * 0.5));
     }

@@ -22,7 +22,7 @@ export class TacMap {
   private drag: { x: number; y: number; moved: number } | null = null;
   cursor: { x: number; z: number } | null = null;
 
-  constructor(private root: HTMLElement, private overview: HTMLCanvasElement, private m: Meta, private onClick: (x: number, z: number) => void) {
+  constructor(private root: HTMLElement, private overview: HTMLCanvasElement, private m: Meta, private marks: { x: number; z: number; name: string }[], private onClick: (x: number, z: number) => void) {
     this.cv = root.querySelector('canvas')!; this.g = this.cv.getContext('2d')!;
     this.cx = (m.x0 + m.x1) / 2; this.cz = (m.z0 + m.z1) / 2;
     const cv = this.cv;
@@ -64,6 +64,7 @@ export class TacMap {
     g.setLineDash([6, 6]); g.lineWidth = 1;
     for (let r = 5000; r <= 30000; r += 5000) { g.strokeStyle = 'rgba(255,255,255,0.22)'; g.beginPath(); g.arc(X(0), Y(0), r * k, 0, 6.283); g.stroke(); g.fillStyle = 'rgba(255,255,255,0.55)'; g.fillText(`${r / 1000} км`, X(0), Y(-r) - 3); }
     g.setLineDash([]);
+    if (k > 0.035) for (const mk of this.marks) { const x = X(mk.x), y = Y(mk.z); g.fillStyle = '#ffe9a8'; g.beginPath(); g.moveTo(x, y - 5); g.lineTo(x + 4, y); g.lineTo(x, y + 5); g.lineTo(x - 4, y); g.fill(); g.fillStyle = 'rgba(255,240,200,0.9)'; g.fillText(mk.name, x, y + 17); } // знаковые объекты — ориентиры
     for (const h of d.hits) { const x = X(h.x), y = Y(h.z); g.fillStyle = 'rgba(20,10,8,0.85)'; g.beginPath(); g.arc(x, y, Math.max(2.5, 40 * k), 0, 6.283); g.fill(); g.strokeStyle = '#ff9a3d'; g.lineWidth = 1; g.stroke(); }
     for (const t of d.drones) { // маршрут: пройденная часть тусклая, оставшаяся яркая
       g.lineWidth = 1.5; g.strokeStyle = 'rgba(255,90,54,0.3)'; g.beginPath(); g.moveTo(X(t.sx), Y(t.sz)); g.lineTo(X(t.x), Y(t.z)); g.stroke();

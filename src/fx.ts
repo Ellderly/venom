@@ -63,22 +63,33 @@ class Layer {
 }
 
 interface Emitter { x: number; y: number; z: number; t: number; dur: number; s: number; acc: number }
+interface Flash { x: number; y: number; z: number; t: number; dur: number; r: number; k: number }
 interface Ring { mesh: THREE.Mesh; t: number; r: number }
 
 export class FX {
   group = new THREE.Group();
-  private fire: Layer; private smoke: Layer; private emitters: Emitter[] = []; private rings: Ring[] = [];
+  private fire: Layer; private smoke: Layer; private emitters: Emitter[] = []; private rings: Ring[] = []; private flashes: Flash[] = [];
+  private scorches: THREE.Mesh[] = []; private scorchGeo = new THREE.CircleGeometry(1, 28).rotateX(-Math.PI / 2); private scorchTex: THREE.Texture;
   private ringGeo = new THREE.RingGeometry(0.86, 1, 48).rotateX(-Math.PI / 2);
   constructor(cap: number) {
     const tex = puffTexture();
     this.smoke = new Layer(cap, false, tex); this.fire = new Layer(Math.round(cap / 2), true, tex);
     this.group.add(this.smoke.mesh, this.fire.mesh);
+    const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d')!; // подпалина: тёмное пятно с рваным краем
+    const gr = g.createRadialGradient(64, 64, 4, 64, 64, 62); gr.addColorStop(0, 'rgba(8,7,6,0.95)'); gr.addColorStop(0.35, 'rgba(14,12,10,0.85)'); gr.addColorStop(0.75, 'rgba(20,18,15,0.4)'); gr.addColorStop(1, 'rgba(20,18,15,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 40; i++) { const a = Math.random() * 6.283, r = 20 + Math.random() * 40; g.strokeStyle = `rgba(10,9,8,${0.15 + Math.random() * 0.3})`; g.lineWidth = 1 + Math.random() * 3; g.beginPath(); g.moveTo(64 + Math.cos(a) * 8, 64 + Math.sin(a) * 8); g.lineTo(64 + Math.cos(a) * r, 64 + Math.sin(a) * r); g.stroke(); }
+    this.scorchTex = new THREE.CanvasTexture(c);
   }
   get count() { return this.fire.n + this.smoke.n; }
 
   /** Взрыв боевой части. tnt — тротиловый эквивалент, кг. */
-  explode(x: number, y: number, z: number, tnt: number) {
+  explode(x: number, y: number, z: number, tnt: number, ground = false) {
     const s = Math.cbrt(tnt), R = Math.random, rnd = () => R() * 2 - 1;
+    this.flashes.push({ x, y: y + s * 2, z, t: 0, dur: 0.9, r: s * 110, k: 9 });
+    if (ground) this.scorch(x, y, z, s * 3.6);
+    for (let i = 0; i < 9; i++) { const a = R() * 6.283, v = s * (3 + R() * 5); this.fire.add(x + Math.cos(a) * s, y + s * 0.5, z + Math.sin(a) * s, Math.cos(a) * v, s * (5 + R() * 6), Math.sin(a) * v, 0.9 + R() * 0.8, s * 2.4, s * 1.4, 1.0, 0.36 + R() * 0.2, 0.05, 1.3); } // вторичные клубы огня уходят вверх
+    for (let i = 0; i < 16; i++) { const g = 0.035 + R() * 0.04; this.smoke.add(x + rnd() * s, y + s * (1 + R() * 2), z + rnd() * s, rnd() * 1.2, s * (2.2 + R() * 2.2), rnd() * 1.2, 9 + R() * 9, s * 2.2, s * 0.75, g, g, g, 0.25, -0.2); }   // столб дыма
     this.fire.add(x, y + s, z, 0, 0, 0, 0.14, s * 14, s * 60, 1.6, 1.4, 1.0);                       // вспышка
     for (let i = 0; i < 26; i++) { const v = s * 5 * (0.4 + R()); this.fire.add(x + rnd() * s, y + R() * s, z + rnd() * s, rnd() * v, R() * v * 1.3 + s * 2, rnd() * v, 0.5 + R() * 0.7, s * 1.6, s * 2.2, 1.0, 0.42 + R() * 0.25, 0.08, 2.2); } // огненный шар
     for (let i = 0; i < 46; i++) { const v = s * 16 * (0.3 + R()); this.fire.add(x, y + 1, z, rnd() * v, R() * v * 1.2, rnd() * v, 0.7 + R() * 1.4, 0.35 + R() * 0.3, -0.15, 1.0, 0.6, 0.2, 0.5, 14); }         // искры
@@ -88,6 +99,26 @@ export class FX {
     const ring = new THREE.Mesh(this.ringGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, fog: false }));
     ring.position.set(x, y + 1.5, z); this.group.add(ring); this.rings.push({ mesh: ring, t: 0, r: s * 16 });
     this.emitters.push({ x, y, z, t: 0, dur: 90 + R() * 60, s, acc: 0 });
+  }
+
+  /** Подпалина на земле. Остаётся до сброса разрушений. */
+  scorch(x: number, y: number, z: number, r: number) {
+    const m = new THREE.Mesh(this.scorchGeo, new THREE.MeshBasicMaterial({ map: this.scorchTex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -16, fog: true }));
+    m.position.set(x, y + 0.15, z); m.scale.setScalar(r); m.rotation.y = Math.random() * 6.283; m.renderOrder = 5; this.group.add(m); this.scorches.push(m);
+    if (this.scorches.length > 300) { const o = this.scorches.shift()!; this.group.remove(o); (o.material as THREE.Material).dispose(); }
+  }
+
+  /** Раз в кадр: четыре самых заметных источника света (вспышки, пожары) — в общие uniform-ы освещения. */
+  lights(cx: number, cy: number, cz: number) {
+    const cand: [number, number, number, number, number, number, number, number][] = []; // вес, x, y, z, радиус, r, g, b
+    for (const f of this.flashes) { const k = f.k * Math.pow(1 - f.t / f.dur, 2.2); cand.push([k * f.r / (60 + Math.hypot(f.x - cx, f.y - cy, f.z - cz)), f.x, f.y, f.z, f.r, k, k * 0.62, k * 0.3]); }
+    for (const e of this.emitters) {
+      const burn = Math.max(0, 1 - e.t / (e.dur * 0.6)); if (burn <= 0) continue;
+      const k = burn * (1.1 + 0.5 * Math.sin(e.t * 11 + e.x) + 0.3 * Math.sin(e.t * 23.7)), r = e.s * 24;
+      cand.push([k * r / (60 + Math.hypot(e.x - cx, e.y - cy, e.z - cz)), e.x, e.y + e.s * 1.5, e.z, r, k, k * 0.42, k * 0.12]);
+    }
+    cand.sort((a, b) => b[0] - a[0]);
+    for (let i = 0; i < 4; i++) { const c = cand[i]; if (c) { U.uLP.value[i].set(c[1], c[2], c[3], c[4]); U.uLC.value[i].set(c[5], c[6], c[7]); } else { U.uLP.value[i].set(0, -1e5, 0, 1); U.uLC.value[i].set(0, 0, 0); } }
   }
 
   /** Облако пыли от падающих обломков. */
@@ -108,6 +139,7 @@ export class FX {
         if (R() < burn) this.fire.add(e.x + (R() - 0.5) * e.s * 2.4, e.y + R() * 1.5, e.z + (R() - 0.5) * e.s * 2.4, (R() - 0.5), 3 + R() * 4, (R() - 0.5), 0.5 + R() * 0.6, e.s * (0.6 + R() * 0.6), -e.s * 0.5, 1.0, 0.45 + R() * 0.2, 0.08, 0.4);
       }
     }
+    for (let i = this.flashes.length - 1; i >= 0; i--) { this.flashes[i].t += dt; if (this.flashes[i].t >= this.flashes[i].dur) this.flashes.splice(i, 1); }
     for (let i = this.rings.length - 1; i >= 0; i--) {
       const r = this.rings[i]; r.t += dt; const k = r.t / 0.45;
       if (k >= 1) { this.group.remove(r.mesh); (r.mesh.material as THREE.Material).dispose(); this.rings.splice(i, 1); continue; }
@@ -115,5 +147,5 @@ export class FX {
     }
     this.fire.update(dt, 0.6); this.smoke.update(dt, 2.2);
   }
-  clear() { this.emitters.length = 0; }
+  clear() { this.emitters.length = 0; this.flashes.length = 0; for (const m of this.scorches) { this.group.remove(m); (m.material as THREE.Material).dispose(); } this.scorches.length = 0; }
 }
