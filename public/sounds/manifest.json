@@ -12,10 +12,10 @@
   "geran5_cruise_far.ogg"
  ],
  "kh101_near": [
-  "kalibr_cruise_loop.ogg"
+  "tomahawk_cruise_loop.ogg"
  ],
  "kh101_far": [
-  "kalibr_cruise_far.ogg"
+  "tomahawk_cruise_far.ogg"
  ],
  "explosion_near": [
   "explosion_near_1.ogg",
@@ -33,5 +33,10 @@
  ],
  "siren": [
   "siren_wail.ogg"
+ ],
+ "mg_burst": [
+  "mg_burst_1.ogg",
+  "mg_burst_2.ogg",
+  "mg_burst_3.ogg"
  ]
 }

@@ -174,7 +174,7 @@ export class Sound {
       for (let i = 0; i < d.length; i++) d[i] = Math.tanh(d[i] * 1.2) * 0.8;
       this.burstBuf = b;
     }
-    const att = Math.min(1, 120 / Math.max(120, dist)), s = c.createBufferSource(); s.buffer = this.burstBuf; s.playbackRate.value = 0.97 + Math.random() * 0.06;
+    const att = Math.min(1, 120 / Math.max(120, dist)), s = c.createBufferSource(); s.buffer = this.pick('mg_burst') ?? this.burstBuf; // запись настоящего крупнокалиберного пулемёта, если загружена s.playbackRate.value = 0.97 + Math.random() * 0.06;
     const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(400, 12000 * Math.exp(-dist / 900));
     const g = c.createGain(); g.gain.value = 0.9 * Math.sqrt(att); const p = c.createStereoPanner(); p.pan.value = Math.max(-0.9, Math.min(0.9, pan));
     s.connect(lp); lp.connect(g); g.connect(p); p.connect(this.master); const w = c.createGain(); w.gain.value = 0.35; p.connect(w); w.connect(this.wet);

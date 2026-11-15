@@ -163,58 +163,111 @@ export function buildGeran5(): THREE.Group {
   return g;
 }
 
-/** Огневая группа: пикап с крупнокалиберным пулемётом в кузове и прожектором. `mount` поворачивается по курсу, `gun` — по углу места. */
-export function buildPickup(): THREE.Group {
-  const g = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({ color: 0x4d5a3c, roughness: 0.75, metalness: 0.15 }), dark = new THREE.MeshStandardMaterial({ color: 0x17181a, roughness: 0.7, metalness: 0.3 });
-  const glass = new THREE.MeshStandardMaterial({ color: 0x1c2a33, roughness: 0.2, metalness: 0.6 }), steel = new THREE.MeshStandardMaterial({ color: 0x2c2e30, roughness: 0.5, metalness: 0.7 });
-  const box = (w: number, h: number, d: number, x: number, y: number, z: number, m: THREE.Material, to: THREE.Object3D = g) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); to.add(b); return b; };
-  box(1.85, 0.5, 5.2, 0, 0.75, 0, paint);                          // рама и борта
-  box(1.8, 0.35, 1.5, 0, 1.1, 1.75, paint);                        // капот
-  box(1.75, 0.75, 1.7, 0, 1.4, 0.25, paint);                       // кабина
-  box(1.6, 0.5, 0.06, 0, 1.47, 1.1, glass).rotation.x = -0.35;      // лобовое стекло
-  box(1.77, 0.42, 1.2, 0, 1.47, 0.2, glass);                       // боковые стёкла
-  box(1.85, 0.45, 0.08, 0, 1.2, -2.56, paint);                     // задний борт
-  for (const sx of [-1, 1]) box(0.08, 0.45, 1.9, sx * 0.89, 1.2, -1.6, paint);
-  box(1.9, 0.18, 0.2, 0, 0.62, 2.6, dark); box(1.9, 0.18, 0.2, 0, 0.62, -2.6, dark); // бамперы
-  for (const sx of [-1, 1]) for (const z of [1.65, -1.6]) { const w = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.3, 14), dark); w.rotation.z = Math.PI / 2; w.position.set(sx * 0.85, 0.4, z); g.add(w); }
-  box(0.25, 0.14, 0.2, 0, 1.86, 0.6, steel);                       // прожектор на крыше
-  const mount = new THREE.Group(); mount.name = 'mount'; mount.position.set(0, 1.0, -1.5); g.add(mount);
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 1.0, 8), steel); post.position.y = 0.5; mount.add(post); // тумба
-  const gun = new THREE.Group(); gun.name = 'gun'; gun.position.y = 1.1; mount.add(gun);
-  box(0.16, 0.2, 0.7, 0, 0, 0.05, steel, gun);                     // ствольная коробка
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 1.5, 8), steel); barrel.rotation.x = Math.PI / 2; barrel.position.z = 1.1; gun.add(barrel);
-  box(0.3, 0.22, 0.3, 0.24, -0.02, 0, paint, gun);                 // патронная коробка
-  box(0.5, 0.04, 0.04, 0, 0, -0.45, steel, gun);                   // рукоятки
-  box(0.6, 0.5, 0.03, 0, 0.1, 0.45, paint, gun);                   // щиток
+/** Корпус произвольного сечения: section — контур сечения [x, y] по кругу, stations — [z, масштаб] от носа к хвосту. Грани плоские, торцы закрыты. */
+function hull(section: number[][], stations: number[][], mat: THREE.Material) {
+  const N = section.length, pos: number[] = [], uv: number[] = [], z0 = stations[0][0], len = z0 - stations[stations.length - 1][0] || 1;
+  const P = (i: number, j: number) => { const [z, k] = stations[i], q = section[j % N]; return [q[0] * k, q[1] * k, z, j / N, (z0 - z) / len]; };
+  const tri = (a: number[], b: number[], c: number[]) => { for (const v of [a, b, c]) { pos.push(v[0], v[1], v[2]); uv.push(v[3], v[4]); } };
+  for (let i = 0; i < stations.length - 1; i++) for (let j = 0; j < N; j++) { const a = P(i, j), b = P(i, j + 1), c = P(i + 1, j + 1), d = P(i + 1, j); tri(a, d, c); tri(a, c, b); }
+  for (const i of [0, stations.length - 1]) { const z = stations[i][0], c = [0, 0, z, 0.5, (z0 - z) / len]; for (let j = 0; j < N; j++) tri(c, P(i, j), P(i, j + 1)); } // торцы
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeVertexNormals();
+  return new THREE.Mesh(g, mat);
+}
+const boxAt = (w: number, h: number, d: number, x: number, y: number, z: number, m: THREE.Material, to: THREE.Object3D) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); to.add(b); return b; };
+
+/**
+ * Х-101 по фотографиям и схемам: ровный серый металлический корпус сплюснутого сечения с ребром по бортам, скруглённый нос,
+ * узкое стреловидное крыло под брюхом, тёмный скошенный киль и два руля в хвосте, двигатель в гондоле под хвостовой частью,
+ * две пары чёрных полос вокруг корпуса. Длина 7,45 м, размах 3,1 м. Материалы двусторонние — тонкие детали не просвечивают.
+ */
+export function buildKh101(): THREE.Group {
+  const g = new THREE.Group(), DS = THREE.DoubleSide;
+  const two = <T extends THREE.Material>(m: T) => { m.side = DS; return m; };
+  const metalLook = (t: { map: THREE.Texture; bump: THREE.Texture }) => { const m = std(t, 0.5); m.metalness = 0.4; return two(m); };
+  const body = metalLook(skin({ size: 1024, base: [148, 151, 155], seamsX: [0, 0.2, 0.5, 0.8], seamsY: [0.09, 0.27, 0.47, 0.63, 0.8, 0.93], draw: (c, b, S) => {
+    c.fillStyle = 'rgba(20,22,24,0.9)'; for (const v of [0.3, 0.315, 0.71, 0.725]) c.fillRect(0, S * v, S, S * 0.006);   // две пары чёрных полос
+    hatch(c, b, S * 0.42, S * 0.33, S * 0.16, S * 0.1); hatch(c, b, S * 0.22, S * 0.5, S * 0.06, S * 0.09); hatch(c, b, S * 0.72, S * 0.5, S * 0.06, S * 0.09); hatch(c, b, S * 0.43, S * 0.66, S * 0.14, S * 0.04); hatch(c, b, S * 0.03, S * 0.5, S * 0.12, S * 0.1);
+    for (const u of [0.25, 0.75]) { label(c, 'ОСТОРОЖНО', S * u, S * 0.17, S * 0.014, 'rgba(30,34,38,0.75)', u > 0.5); label(c, '0417', S * u, S * 0.22, S * 0.02, 'rgba(30,34,38,0.8)', u > 0.5); label(c, '▲', S * u, S * 0.4, S * 0.018, 'rgba(150,40,34,0.8)', u > 0.5); }
+    soot(c, S, 0.92, 0.35);
+  } }));
+  const wingM = metalLook(skin({ size: 512, base: [140, 144, 149], seamsX: [0.5], seamsY: [0.25, 0.75], repeat: true }));
+  const finM = two(new THREE.MeshStandardMaterial({ color: 0x4a4e54, roughness: 0.6, metalness: 0.3 }));
+  const metal = two(new THREE.MeshStandardMaterial({ color: 0x77777a, roughness: 0.45, metalness: 0.7 })), hot = two(new THREE.MeshStandardMaterial({ color: 0x3a332e, roughness: 0.55, metalness: 0.6 })), dark = two(new THREE.MeshStandardMaterial({ color: 0x101112, roughness: 0.7 }));
+  // сечение: плоский низ, скос к ребру на борту, наклонные борта, скруглённый верх
+  const half = [[0, -0.27], [0.24, -0.27], [0.37, -0.09], [0.33, 0.14], [0.2, 0.29], [0, 0.33]], sec = [...half, ...half.slice(1, -1).reverse().map(p => [-p[0], p[1]])];
+  g.add(hull(sec, [[3.725, 0.16], [3.66, 0.36], [3.5, 0.58], [3.2, 0.78], [2.8, 0.92], [2.3, 0.99], [1.8, 1], [-2.5, 1], [-3.0, 0.9], [-3.4, 0.7], [-3.725, 0.34]], body));
+  // крыло: узкое, отведено назад, узел поворота под брюхом посередине корпуса
+  for (const sx of [-1, 1]) { const w = plate([[sx * 0.1, 0.55], [sx * 0.32, 0.5], [sx * 1.55, -0.38], [sx * 1.55, -0.66], [sx * 0.32, 0.02], [sx * 0.1, 0.02]], 0.05, wingM, 0.015); w.position.y += -0.3; g.add(w); }
+  boxAt(0.5, 0.07, 0.95, 0, -0.285, 0.25, wingM, g);
+  // хвост: скошенный тёмный киль вверх и два руля с небольшим наклоном концов вниз
+  g.add(fin([[-3.05, 0.2], [-3.62, 0.2], [-3.74, 0.9], [-3.5, 0.9]], 0.04, finM));
+  for (const sx of [-1, 1]) { const grp = new THREE.Group(); grp.position.set(sx * 0.14, -0.04, 0); grp.rotation.z = -sx * 0.2; grp.add(plate([[0, -3.2], [sx * 0.68, -3.5], [sx * 0.68, -3.7], [0, -3.62]], 0.04, finM, 0.012)); g.add(grp); }
+  // двигатель ТРДД-50А: гондола на коротком пилоне под хвостовой частью
+  const ny = -0.6; boxAt(0.09, 0.3, 0.6, 0, -0.4, -2.85, wingM, g);
+  const nac = lathe([[0.13, -2.4], [0.17, -2.36], [0.19, -2.42], [0.195, -2.7], [0.18, -3.2]], 22, wingM); nac.position.y = ny; g.add(nac);
+  const lip = lathe([[0.13, -2.48], [0.13, -2.4], [0.17, -2.36]], 22, metal); lip.position.y = ny; g.add(lip);
+  const fan = new THREE.Mesh(new THREE.CircleGeometry(0.132, 22), dark); fan.position.set(0, ny, -2.46); g.add(fan);
+  const cone = lathe([[0, -2.36], [0.035, -2.41], [0.05, -2.46]], 12, metal); cone.position.y = ny; g.add(cone);
+  const noz = lathe([[0.18, -3.2], [0.15, -3.32], [0.11, -3.36], [0.1, -3.36], [0.09, -3.24]], 22, hot); noz.position.y = ny; g.add(noz);
+  const glow = jetGlow(0.075); glow.position.set(0, ny, -3.35); g.add(glow);
   return g;
 }
 
-/** Х-101: сплюснутый корпус с гранёным носом, раскрывающееся крыло снизу, три хвостовых руля, ТРДД на пилоне под хвостом. Длина 7,45 м, размах 3 м. */
-export function buildKh101(): THREE.Group {
+/** Пиксельный камуфляж: зелёные, тёмные и песочные квадраты, грязь по низу. */
+function camoSkin() {
+  const S = 256, c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d')!; seed = 911;
+  g.fillStyle = '#5b6b43'; g.fillRect(0, 0, S, S);
+  const cols = ['#3f4c2e', '#6f7c50', '#2c3423', '#8a8a62', '#4a5a38'];
+  for (let i = 0; i < 520; i++) { const x = Math.floor(rnd() * 32) * 8, y = Math.floor(rnd() * 32) * 8, w = (1 + Math.floor(rnd() * 3)) * 8, h = (1 + Math.floor(rnd() * 2)) * 8; g.fillStyle = cols[Math.floor(rnd() * cols.length)]; g.fillRect(x, y, w, h); }
+  for (let i = 0; i < 1500; i++) { const v = rnd() < 0.5 ? 255 : 0; g.fillStyle = `rgba(${v},${v},${v},0.04)`; g.fillRect(rnd() * S, rnd() * S, 2, 2); }
+  const d = g.createLinearGradient(0, S * 0.55, 0, S); d.addColorStop(0, 'rgba(70,60,45,0)'); d.addColorStop(1, 'rgba(70,60,45,0.55)'); g.fillStyle = d; g.fillRect(0, 0, S, S); // пыль и грязь снизу
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
+
+/**
+ * Огневая группа: пикап с двойной кабиной в пиксельном камуфляже, в кузове — крупнокалиберный пулемёт на тумбе со стрелком,
+ * на крыше — прожектор. `mount` поворачивается по курсу (вместе со стрелком), `gun` — по углу места.
+ */
+export function buildPickup(): THREE.Group {
   const g = new THREE.Group();
-  const body = std(skin({ size: 1024, base: [112, 118, 122], seamsX: [0, 0.5], seamsY: [0.13, 0.3, 0.5, 0.68, 0.86], draw: (c, b, S) => {
-    c.fillStyle = 'rgba(52,56,60,0.92)'; c.fillRect(0, 0, S, S * 0.13);                         // радиопрозрачный нос
-    c.fillStyle = 'rgba(170,40,34,0.9)'; c.fillRect(0, S * 0.3, S, S * 0.008);
-    hatch(c, b, S * 0.44, S * 0.36, S * 0.12, S * 0.09); hatch(c, b, S * 0.2, S * 0.56, S * 0.1, S * 0.08); hatch(c, b, S * 0.7, S * 0.56, S * 0.1, S * 0.08); hatch(c, b, S * 0.45, S * 0.74, S * 0.1, S * 0.07);
-    label(c, 'Х-101  0417', S * 0.25, S * 0.2, S * 0.034, 'rgba(30,32,34,0.85)', false); label(c, 'Х-101  0417', S * 0.75, S * 0.2, S * 0.034, 'rgba(30,32,34,0.85)', true);
-    soot(c, S, 0.9, 0.5);
-  } }));
-  const panel = std(skin({ size: 512, base: [104, 110, 114], seamsX: [0.3, 0.7], seamsY: [0.4, 0.9], repeat: true }));
-  const metal = new THREE.MeshStandardMaterial({ color: 0x6c6a66, roughness: 0.45, metalness: 0.7 }), hot = new THREE.MeshStandardMaterial({ color: 0x3a332e, roughness: 0.55, metalness: 0.6 }), dark = new THREE.MeshStandardMaterial({ color: 0x141516, roughness: 0.7 });
-  const L = 7.45, z0 = L / 2, prof: number[][] = [[0, z0], [0.08, z0 - 0.1], [0.2, z0 - 0.45], [0.31, z0 - 0.95], [0.37, z0 - 1.6], [0.37, -2.6], [0.33, -3.2], [0.24, -3.6], [0.12, -z0], [0, -z0]];
-  const fus = lathe(prof, 28, body); fus.scale.set(1.12, 1, 0.84); g.add(fus);                    // сплюснутое сечение (масштаб по осям тела вращения: x — ширина, z — высота)
-  // крыло: под фюзеляжем, небольшая стреловидность
-  const hw = 1.5, w = plate([[0, 0.55], [0.3, 0.55], [hw, 0.18], [hw, -0.12], [0.3, 0.0], [-0.3, 0.0], [-hw, -0.12], [-hw, 0.18], [-0.3, 0.55]], 0.07, panel, 0.02); w.position.y += -0.27; g.add(w);
-  // хвост: два руля с отрицательным поперечным V и киль вверх
-  for (const sx of [-1, 1]) { const f = plate([[0, -3.0], [0.75, -3.25], [0.75, -3.55], [0, -3.5]], 0.05, panel, 0.015); f.position.set(sx * 0.2, -0.02, 0); f.rotation.z = sx * 0.35; if (sx < 0) f.scale.x = -1; g.add(f); }
-  const keel = fin([[-3.55, 0.18], [-3.0, 0.18], [-3.3, 0.85], [-3.55, 0.85]], 0.05, panel); g.add(keel);
-  // двигатель на пилоне под хвостовой частью
-  const ny = -0.52, py = fin([[-3.0, -0.42], [-2.3, -0.42], [-2.4, -0.26], [-2.95, -0.26]], 0.08, panel); g.add(py);
-  const nac = lathe([[0.12, -2.05], [0.15, -2.0], [0.17, -2.06], [0.175, -2.3], [0.165, -3.0]], 20, panel); nac.position.y = ny; g.add(nac);
-  const lip = lathe([[0.12, -2.1], [0.12, -2.05], [0.15, -2.0]], 20, metal); lip.position.y = ny; g.add(lip);
-  const fan = new THREE.Mesh(new THREE.CircleGeometry(0.122, 20), dark); fan.position.set(0, ny, -2.08); g.add(fan);
-  const noz = lathe([[0.165, -3.0], [0.14, -3.14], [0.1, -3.2], [0.09, -3.2], [0.08, -3.08]], 20, hot); noz.position.y = ny; g.add(noz);
-  const glow = jetGlow(0.07); glow.position.set(0, ny, -3.19); g.add(glow);
+  const paint = new THREE.MeshStandardMaterial({ map: camoSkin(), roughness: 0.85, metalness: 0.05 }), dark = new THREE.MeshStandardMaterial({ color: 0x151617, roughness: 0.8, metalness: 0.2 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x1a2a34, roughness: 0.15, metalness: 0.7 }), steel = new THREE.MeshStandardMaterial({ color: 0x2b2d2f, roughness: 0.5, metalness: 0.75 });
+  const lamp = new THREE.MeshStandardMaterial({ color: 0xf2efe2, roughness: 0.3, emissive: 0x554d38 }), red = new THREE.MeshStandardMaterial({ color: 0x8c1a14, roughness: 0.4, emissive: 0x2a0503 });
+  const cloth = new THREE.MeshStandardMaterial({ color: 0x4a5136, roughness: 0.95 }), skinM = new THREE.MeshStandardMaterial({ color: 0xb08a6a, roughness: 0.9 });
+  const B = (w: number, h: number, d: number, x: number, y: number, z: number, m: THREE.Material, to: THREE.Object3D = g) => boxAt(w, h, d, x, y, z, m, to);
+  B(1.7, 0.22, 5.0, 0, 0.5, 0, dark);                               // рама
+  B(1.86, 0.52, 5.25, 0, 0.86, 0, paint);                            // нижний пояс кузова
+  B(1.8, 0.2, 1.35, 0, 1.18, 1.9, paint).rotation.x = 0.07;           // капот, чуть покатый
+  B(1.78, 0.74, 2.15, 0, 1.47, 0.3, paint);                          // двойная кабина
+  B(1.62, 0.56, 0.05, 0, 1.52, 1.42, glass).rotation.x = -0.42;       // лобовое
+  B(1.6, 0.4, 0.05, 0, 1.56, -0.78, glass);                          // заднее
+  for (const sx of [-1, 1]) { B(0.03, 0.36, 0.82, sx * 0.9, 1.58, 0.82, glass); B(0.03, 0.36, 0.78, sx * 0.9, 1.58, -0.12, glass); B(0.05, 0.4, 0.07, sx * 0.9, 1.56, 0.36, paint); } // боковые стёкла и стойка
+  for (const sx of [-1, 1]) { B(0.08, 0.5, 1.75, sx * 0.89, 1.32, -1.7, paint); B(0.1, 0.05, 1.75, sx * 0.89, 1.59, -1.7, dark); } // борта кузова с окантовкой
+  B(1.86, 0.5, 0.08, 0, 1.32, -2.58, paint); B(1.7, 0.06, 1.75, 0, 1.1, -1.7, dark); // задний борт, пол кузова
+  B(1.5, 0.3, 0.06, 0, 0.98, 2.63, dark); B(1.9, 0.16, 0.22, 0, 0.66, 2.66, dark); B(1.9, 0.16, 0.22, 0, 0.66, -2.66, dark); // решётка и бамперы
+  for (const sx of [-1, 1]) { B(0.36, 0.14, 0.05, sx * 0.68, 1.06, 2.64, lamp); B(0.2, 0.26, 0.05, sx * 0.8, 1.2, -2.63, red); B(0.12, 0.1, 0.2, sx * 1.0, 1.42, 1.25, dark); } // фары, фонари, зеркала
+  for (const sx of [-1, 1]) for (const z of [1.72, -1.62]) { // колёса с дисками и арки
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.3, 18), dark); w.rotation.z = Math.PI / 2; w.position.set(sx * 0.86, 0.42, z); g.add(w);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.32, 10), steel); hub.rotation.z = Math.PI / 2; hub.position.copy(w.position); g.add(hub);
+    B(0.12, 0.1, 1.05, sx * 0.93, 0.9, z, dark);
+  }
+  // дуга за кабиной и прожектор на крыше
+  for (const sx of [-1, 1]) B(0.06, 0.7, 0.06, sx * 0.8, 1.75, -0.92, steel); B(1.66, 0.06, 0.06, 0, 2.08, -0.92, steel);
+  const sl = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.13, 0.2, 14), steel); sl.rotation.x = Math.PI / 2 - 0.5; sl.position.set(0.45, 2.02, 0.1); g.add(sl);
+  const lens = new THREE.Mesh(new THREE.CircleGeometry(0.15, 14), lamp); lens.position.set(0.45, 2.07, 0.19); lens.rotation.x = -0.5; g.add(lens);
+  // пулемёт на тумбе, стрелок стоит за ним и поворачивается вместе с установкой
+  const mount = new THREE.Group(); mount.name = 'mount'; mount.position.set(0, 1.13, -1.75); g.add(mount);
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 1.0, 8), steel); post.position.y = 0.5; mount.add(post);
+  for (let k = 0; k < 3; k++) { const leg = B(0.05, 0.05, 0.7, 0, 0.06, 0, steel, mount); leg.rotation.y = k * 2.094; leg.translateZ(0.3); } // тренога
+  const gun = new THREE.Group(); gun.name = 'gun'; gun.position.y = 1.08; mount.add(gun);
+  B(0.15, 0.19, 0.72, 0, 0, 0.05, steel, gun);                       // ствольная коробка
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.036, 1.25, 8), steel); barrel.rotation.x = Math.PI / 2; barrel.position.z = 1.02; gun.add(barrel);
+  const jacket = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.42, 10), steel); jacket.rotation.x = Math.PI / 2; jacket.position.z = 0.62; gun.add(jacket);
+  const brake = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.045, 0.12, 8), steel); brake.rotation.x = Math.PI / 2; brake.position.z = 1.68; gun.add(brake);
+  B(0.28, 0.2, 0.3, 0.23, -0.03, 0.02, cloth, gun); B(0.44, 0.035, 0.035, 0, 0, -0.42, steel, gun); B(0.03, 0.14, 0.03, 0, 0.16, 0.3, steel, gun); // короб с лентой, рукоятки, прицел
+  B(0.34, 0.5, 0.2, 0, 0.35, -0.78, cloth, mount); B(0.4, 0.56, 0.24, 0, 0.9, -0.78, cloth, mount); // ноги и корпус стрелка в бронежилете
+  for (const sx of [-1, 1]) { const arm = B(0.1, 0.1, 0.5, sx * 0.2, 1.02, -0.56, cloth, mount); arm.rotation.y = -sx * 0.25; }
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), skinM); head.position.set(0, 1.3, -0.76); mount.add(head);
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 6, 0, 6.283, 0, 1.7), cloth); helmet.position.set(0, 1.33, -0.76); mount.add(helmet);
   return g;
 }
