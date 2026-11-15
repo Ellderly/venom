@@ -5,11 +5,17 @@ import { U, LIT_GLSL } from './env';
 import { Quality } from './quality';
 
 /** Низкополигональные заготовки высотой 1: лиственное, сосна, тополь. aPart: 0 — ствол, 1 — крона. */
-function treeGeometry(kind: number) {
+function treeGeometry(kind: number, lo = false) {
   const parts: THREE.BufferGeometry[] = [], flags: number[] = [];
-  const push = (g: THREE.BufferGeometry, crown: number) => { if (g.index) g = g.toNonIndexed(); g.computeVertexNormals(); parts.push(g); flags.push(crown); };
-  const blob = (r: number, sy: number, x: number, y: number, z: number, det = 1) => { const g = new THREE.IcosahedronGeometry(r, det); g.scale(1, sy, 1); g.translate(x, y, z); return g; };
-  if (kind === 0) { push(new THREE.CylinderGeometry(0.02, 0.036, 0.34, 5).translate(0, 0.17, 0), 0); push(blob(0.36, 0.92, 0, 0.64, 0), 1); push(blob(0.25, 0.85, 0.2, 0.5, 0.1, 0), 1); push(blob(0.23, 0.85, -0.18, 0.54, -0.13, 0), 1); push(blob(0.2, 0.8, 0.02, 0.5, -0.22, 0), 1); }
+  const push = (g: THREE.BufferGeometry, crown: number) => { if (g.index) g = g.toNonIndexed(); if (!lo) g.computeVertexNormals(); parts.push(g); flags.push(crown); };
+  const blob = (r: number, sy: number, x: number, y: number, z: number, det = 1) => {
+    const g = new THREE.IcosahedronGeometry(r, det); g.scale(1, sy, 1);
+    if (lo) { const p = g.getAttribute('position'), n = g.getAttribute('normal'); for (let i = 0; i < p.count; i++) { const nx = p.getX(i), ny = p.getY(i) / (sy * sy), nz = p.getZ(i), l = Math.hypot(nx, ny, nz) || 1; n.setXYZ(i, nx / l, ny / l, nz / l); } } // грубая крона со сглаженными нормалями выглядит круглой, а не гранёной
+    g.translate(x, y, z); return g;
+  };
+  // дальний вариант: одна грубая крона без ствола — 20 треугольников вместо 100–160; издалека разницы не видно
+  if (lo) push(kind === 0 ? blob(0.4, 0.95, 0, 0.6, 0, 0) : kind === 1 ? blob(0.21, 1.5, 0, 0.72, 0, 0) : blob(0.13, 3.3, 0, 0.56, 0, 0), 1);
+  else if (kind === 0) { push(new THREE.CylinderGeometry(0.02, 0.036, 0.34, 5).translate(0, 0.17, 0), 0); push(blob(0.36, 0.92, 0, 0.64, 0), 1); push(blob(0.25, 0.85, 0.2, 0.5, 0.1, 0), 1); push(blob(0.23, 0.85, -0.18, 0.54, -0.13, 0), 1); push(blob(0.2, 0.8, 0.02, 0.5, -0.22, 0), 1); }
   else if (kind === 1) { push(new THREE.CylinderGeometry(0.016, 0.03, 0.72, 5).translate(0, 0.36, 0), 0); push(blob(0.2, 0.75, 0, 0.82, 0), 1); push(blob(0.13, 0.7, 0.1, 0.68, -0.06, 0), 1); }
   else { push(new THREE.CylinderGeometry(0.018, 0.03, 0.3, 5).translate(0, 0.15, 0), 0); push(blob(0.13, 3.3, 0, 0.56, 0), 1); }
   let n = 0; for (const p of parts) n += p.getAttribute('position').count;
@@ -26,15 +32,18 @@ export class Trees {
   group = new THREE.Group();      // деревья — отбрасывают тень
   lampGroup = new THREE.Group();  // фонари — нет
   private tiles = new Map<number, TreeTile>(); private pending = new Set<number>(); private worker: Worker | null = null; private busy = 0;
-  private geos = [0, 1, 2].map(treeGeometry);
+  private geos = [0, 1, 2].map(k => treeGeometry(k)); private geosLo = [0, 1, 2].map(k => treeGeometry(k, true));
+  private matLo!: THREE.ShaderMaterial;
   private mat: THREE.ShaderMaterial; private bulbMat: THREE.ShaderMaterial; private poolMat: THREE.ShaderMaterial; private poolGeo: THREE.BufferGeometry;
   count = 0;
 
   constructor(private map: MapData, private q: Quality) {
     this.mat = new THREE.ShaderMaterial({
-      uniforms: { ...U },
-      vertexShader: `attribute vec4 iPos; attribute vec4 iVar; attribute float aPart; varying vec3 vW; varying vec3 vN; varying vec3 vC; uniform float uTime;
+      uniforms: { ...U, uHi: { value: 1 }, uLodD: { value: q.treeLod } },
+      vertexShader: `attribute vec4 iPos; attribute vec4 iVar; attribute float aPart; varying vec3 vW; varying vec3 vN; varying vec3 vC; uniform float uTime, uHi, uLodD;
         void main(){
+          // два уровня детализации: подробные деревья — только ближе uLodD к камере, грубые — дальше. В проходе теней камера — «солнце», поэтому тени всегда от грубых.
+          if ((uHi > 0.5) == (distance(cameraPosition, iPos.xyz) > uLodD)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
           float c = cos(iVar.x), s = sin(iVar.x); mat2 R = mat2(c, s, -s, c);
           vec3 p = position; p.xz = R * p.xz * iVar.z; p *= iPos.w;
           p.xz += aPart * position.y * position.y * iPos.w * 0.02 * vec2(sin(uTime * 1.1 + iPos.x * 0.07 + iPos.z * 0.05), cos(uTime * 0.9 + iPos.z * 0.06)); // ветер
@@ -59,6 +68,7 @@ export class Trees {
         void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); float d = -mv.z; gl_PointSize = clamp(uScale * aS * 2.6 / d, 1.5, 22.0); vA = exp(-d * d * uFogD * uFogD) * clamp(2.0 - d / 9000.0, 0.0, 1.0); gl_Position = projectionMatrix * mv; }`,
       fragmentShader: `uniform float uNight; varying float vA; void main(){ float r = length(gl_PointCoord - 0.5) * 2.0; float a = pow(max(0.0, 1.0 - r), 2.2); gl_FragColor = vec4(vec3(1.0, 0.8, 0.5) * a * vA * uNight * 1.6, 1.0); }`,
     });
+    this.matLo = this.mat.clone(); this.matLo.uniforms = { ...this.mat.uniforms, uHi: { value: 0 } };
     this.poolMat = new THREE.ShaderMaterial({
       uniforms: { uNight: U.uNight, uFogD: U.uFogD }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -12,
       vertexShader: `attribute vec4 iPos; uniform float uFogD; varying vec2 vUv; varying float vA;
@@ -82,10 +92,13 @@ export class Trees {
       if (!c) continue;
       const pos = new Float32Array(c * 4), vr = new Float32Array(c * 4); let o = 0;
       for (let i = 0; i < n; i++) if (d.trees[i * 8 + 7] === kind) { pos.set(d.trees.subarray(i * 8, i * 8 + 4), o * 4); vr.set(d.trees.subarray(i * 8 + 4, i * 8 + 8), o * 4); o++; }
-      const g = new THREE.InstancedBufferGeometry(); const src = this.geos[kind];
-      for (const a of ['position', 'normal', 'aPart']) g.setAttribute(a, src.getAttribute(a));
-      g.setAttribute('iPos', new THREE.InstancedBufferAttribute(pos, 4)); g.setAttribute('iVar', new THREE.InstancedBufferAttribute(vr, 4)); g.instanceCount = c; g.boundingSphere = sphere;
-      const m = new THREE.Mesh(g, this.mat); tt.meshes.push(m); this.group.add(m);
+      const iPos = new THREE.InstancedBufferAttribute(pos, 4), iVar = new THREE.InstancedBufferAttribute(vr, 4);
+      for (const hi of [true, false]) { // подробная и грубая копии на одних и тех же данных о деревьях
+        const g = new THREE.InstancedBufferGeometry(), src = (hi ? this.geos : this.geosLo)[kind];
+        for (const a of ['position', 'normal', 'aPart']) g.setAttribute(a, src.getAttribute(a));
+        g.setAttribute('iPos', iPos); g.setAttribute('iVar', iVar); g.instanceCount = c; g.boundingSphere = sphere;
+        const m = new THREE.Mesh(g, hi ? this.mat : this.matLo); m.userData.hi = hi; tt.meshes.push(m); this.group.add(m);
+      }
     }
     this.count += n;
     const ln = d.lamps.length / 4;
@@ -100,13 +113,14 @@ export class Trees {
     this.tiles.set(d.tile, tt);
   }
   private dropTile(t: number, tt: TreeTile) {
-    for (const m of tt.meshes) { this.group.remove(m); this.count -= (m.geometry as THREE.InstancedBufferGeometry).instanceCount; m.geometry.dispose(); }
+    for (const m of tt.meshes) { this.group.remove(m); if (!m.userData.hi) this.count -= (m.geometry as THREE.InstancedBufferGeometry).instanceCount; m.geometry.dispose(); }
     for (const l of tt.lamps) { this.lampGroup.remove(l); (l as THREE.Mesh).geometry.dispose(); }
     this.tiles.delete(t);
   }
 
-  update(cx: number, cz: number, camDist: number, viewH: number) {
+  update(cx: number, cz: number, camDist: number, viewH: number, cam: THREE.Vector3) {
     if (!this.worker) return;
+    for (const tt of this.tiles.values()) for (const m of tt.meshes) if (m.userData.hi) m.visible = m.geometry.boundingSphere!.center.distanceTo(cam) < this.q.treeLod + 800; // подробные — только в тайлах рядом с камерой
     const mp = this.map, R = camDist > 7000 ? 0 : Math.min(this.q.treeDist, 700 + camDist * 1.3);
     this.lampGroup.visible = U.uNight.value > 0.03; this.bulbMat.uniforms.uScale.value = viewH * 0.5;
     const ci = (cx - mp.meta.x0) / TILE - 0.5, cj = (cz - mp.meta.z0) / TILE - 0.5, rt = R / TILE + 0.5;

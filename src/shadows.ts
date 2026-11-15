@@ -8,7 +8,7 @@ export class Shadows {
   casters: THREE.Object3D[] = [];
   private swapped: [THREE.Mesh, THREE.Material | THREE.Material[]][] = [];
   private bias = new THREE.Matrix4().set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
-  private v = new THREE.Vector3(); private scene = new THREE.Scene();
+  private v = new THREE.Vector3(); private scene = new THREE.Scene(); private frame = 0;
 
   constructor(private size: number) {
     this.rt = new THREE.WebGLRenderTarget(size, size, { depthBuffer: true, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
@@ -22,6 +22,7 @@ export class Shadows {
     const sun = U.uSun.value;
     const strength = Math.min(1, Math.max(0, (sun.y - 0.06) / 0.12)) * (1 - 0.45 * U.uNight.value) * Math.min(1, Math.max(0, (9000 - t.dist) / 3000));
     U.uShadowOn.value = strength; if (strength <= 0.01) return;
+    if (this.frame++ & 1) return; // карту теней обновляем через кадр: солнце и камера за один кадр почти не сдвигаются, а проход теней — половина геометрии
     const R = Math.min(3200, Math.max(220, t.dist * 0.95)), texel = 2 * R / this.size, c = this.cam;
     U.uShadowTexel.value = texel;
     c.left = -R; c.right = R; c.top = R; c.bottom = -R; c.near = 10; c.far = 9000; c.updateProjectionMatrix();

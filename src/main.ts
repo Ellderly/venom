@@ -639,7 +639,7 @@ function frame(nowMs: number) {
   cc.update(dt); const t = cc.target;
   env.update(dt, scene, cc.cam);
   U.uFogD.value = 1 / Math.max(45000, t.dist * 3.2);
-  ground.update(t.x, t.z, t.dist); buildings.update(t.x, t.z, t.dist); trees.update(t.x, t.z, t.dist, canvas.height);
+  ground.update(t.x, t.z, t.dist); buildings.update(t.x, t.z, t.dist); trees.update(t.x, t.z, t.dist, canvas.height, cc.cam.position);
   heard.length = 0; tacData.drones.length = 0;
   if (session) {
     const now = session.now(), filter = $<HTMLSelectElement>('tgFilter').value;

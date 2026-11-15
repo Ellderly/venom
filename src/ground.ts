@@ -1,13 +1,11 @@
 // Земля: общая сетка рельефа с обзорной текстурой + детальные тайлы 1×1 км вокруг камеры + ближние тайлы 250×250 м
 // с разметкой, переходами и шпалами. Вода, мелкая фактура поверхностей, тени и свет взрывов — в шейдере.
 import * as THREE from 'three';
-import { MapData, TILE, ROAD_W } from './map';
+import { MapData, TILE } from './map';
 import { U, LIT_GLSL } from './env';
 import { Quality } from './quality';
+import { Painter, LAND } from './groundpaint';
 
-//                 вода       лес        парк       жилое      промзона   поле       песок      ж/д
-const AREA_COL = ['#3d6a86', '#3f5c33', '#6f9350', '#a9a79b', '#9c978d', '#b3ae78', '#d6cb9f', '#8d8a86'];
-const LAND = '#8c9a68', SHALLOW = '#6f9db0';
 const MICRO = 250;
 
 function groundMaterial(tex: THREE.Texture, offset: number) {
@@ -51,31 +49,23 @@ function groundMaterial(tex: THREE.Texture, offset: number) {
   });
 }
 
-/** Узор крон: сверху лес выглядит не ровной заливкой, а пятнами деревьев. Размер плитки — 64 м. */
-function canopyPattern() {
-  const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d')!;
-  let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  for (let i = 0; i < 260; i++) {
-    const x = rnd() * 128, y = rnd() * 128, r = 3.5 + rnd() * 5, l = rnd();
-    for (const [ox, oy] of [[0, 0], [128, 0], [-128, 0], [0, 128], [0, -128]]) { // плитка без швов
-      const gr = g.createRadialGradient(x + ox - r * 0.3, y + oy - r * 0.3, 0, x + ox, y + oy, r);
-      gr.addColorStop(0, `rgba(${90 + l * 50},${125 + l * 45},${60 + l * 30},0.55)`); gr.addColorStop(0.7, `rgba(${40 + l * 30},${70 + l * 30},${30 + l * 20},0.45)`); gr.addColorStop(1, 'rgba(20,35,15,0)');
-      g.fillStyle = gr; g.beginPath(); g.arc(x + ox, y + oy, r, 0, 6.283); g.fill();
-    }
-  }
-  return c;
-}
-
-interface Tile { mesh: THREE.Mesh; tex: THREE.CanvasTexture; used: number }
+interface Tile { mesh: THREE.Mesh; tex: THREE.Texture; used: number }
 
 export class Ground {
   group = new THREE.Group();
   private detail = new Map<number, Tile>(); private micro = new Map<number, Tile>();
-  private frame = 0; private canopy = canopyPattern();
+  private frame = 0; private painter: Painter; private worker: Worker; private pending = new Map<string, { store: Map<number, Tile>; t: number; x0: number; z0: number; size: number; level: number }>();
   /** Обзорная картинка всей карты — её же показывают тактическая карта и мини-карта. */
   overview!: HTMLCanvasElement;
 
-  constructor(private map: MapData, private q: Quality, private maxAniso: number) {}
+  constructor(private map: MapData, private q: Quality, private maxAniso: number) {
+    const mp = map, data = { aPts: mp.aPts, aRing: mp.aRing, aStart: mp.aStart, aCls: mp.aCls, lPts: mp.lPts, lStart: mp.lStart, lCls: mp.lCls, lineOnBridge: mp.lineOnBridge, bPts: mp.bPts, bStart: mp.bStart };
+    this.painter = new Painter(data);
+    // тайлы вокруг камеры рисует фоновый поток: в основном это давало подвисание на каждый новый тайл
+    this.worker = new Worker(new URL('./groundworker.ts', import.meta.url), { type: 'module' });
+    this.worker.postMessage({ type: 'init', map: data });
+    this.worker.onmessage = e => this.onTile(e.data.key, e.data.bitmap);
+  }
 
   /** Обзорная текстура всей карты. Рисуется один раз при загрузке. */
   async buildOverview(progress: (p: number) => void) {
@@ -86,8 +76,8 @@ export class Ground {
     g.setTransform(s, 0, 0, s, -m.x0 * s, -m.z0 * s);
     g.fillStyle = LAND; g.fillRect(m.x0, m.z0, W, H);
     const all = (n: number) => Array.from({ length: n }, (_, i) => i);
-    this.drawAreas(g, all(this.map.aN), 1 / s); progress(0.3); await new Promise(r => setTimeout(r));
-    this.drawLines(g, all(this.map.lN), 1 / s, 3); progress(0.6); await new Promise(r => setTimeout(r));
+    this.painter.drawAreas(g, all(this.map.aN), 1 / s); progress(0.3); await new Promise(r => setTimeout(r));
+    this.painter.drawLines(g, all(this.map.lN), 1 / s, 3); progress(0.6); await new Promise(r => setTimeout(r));
     // контуры зданий: издалека город читается и там, где геометрия не загружена
     const mp = this.map, p = mp.bPts; g.fillStyle = '#b4aea2';
     g.beginPath();
@@ -120,98 +110,18 @@ export class Ground {
     skirt.position.set((m.x0 + m.x1) / 2, m.hmin - 3, (m.z0 + m.z1) / 2); this.group.add(skirt);
   }
 
-  private areaPath(g: CanvasRenderingContext2D, a: number) {
-    const mp = this.map, p = mp.aPts; g.beginPath();
-    for (let r = mp.aStart[a]; r < mp.aStart[a + 1]; r++) {
-      const s = mp.aRing[r], e = mp.aRing[r + 1];
-      g.moveTo(p[s * 2], p[s * 2 + 1]); for (let i = s + 1; i < e; i++) g.lineTo(p[i * 2], p[i * 2 + 1]); g.closePath();
-    }
+  /** Запрос тайла земли у фонового потока: size — сторона в метрах (1000 или 250), t — индекс километрового тайла, из которого берутся объекты. */
+  private request(store: Map<number, Tile>, id: number, x0: number, z0: number, size: number, res: number, t: number, level: number) {
+    const mp = this.map, key = `${level}:${id}`; if (this.pending.has(key) || this.pending.size >= 3) return;
+    const B = mp.buildingsNear(x0 + size / 2, z0 + size / 2, size * 0.72 + 60).filter(b => mp.bH[b]); // дома, заменённые отдельными моделями, тени не дают
+    this.pending.set(key, { store, t: id, x0, z0, size, level });
+    this.worker.postMessage({ type: 'tile', key, x0, z0, size, res, A: mp.tileA[t], L: mp.tileL[t], B });
   }
-  private drawAreas(g: CanvasRenderingContext2D, ids: number[], mPerPx: number) {
-    const mp = this.map, pat = g.createPattern(this.canopy, 'repeat')!; pat.setTransform(new DOMMatrix().scale(0.5)); // 128 пикселей узора = 64 м
-    for (const a of ids) {
-      const c = mp.aCls[a]; g.fillStyle = AREA_COL[c]; this.areaPath(g, a); g.fill('evenodd');
-      if (c === 1) { g.fillStyle = pat; g.fill('evenodd'); }
-      else if (c === 2 && mPerPx < 6) { g.globalAlpha = 0.3; g.fillStyle = pat; g.fill('evenodd'); g.globalAlpha = 1; }
-      else if (c === 0) { // мелководье у берега: светлая кромка внутри контура воды
-        g.save(); g.clip('evenodd'); g.strokeStyle = SHALLOW; g.lineJoin = 'round';
-        g.globalAlpha = 0.13; for (const w of [120, 96, 74, 54, 36, 20]) { g.lineWidth = Math.max(w, mPerPx * w / 20); g.stroke(); } // плавный переход к глубине
-        g.restore();
-      }
-    }
-  }
-
-  /** mPerPx — метров на пиксель; maxCls — самые мелкие дороги, которые ещё рисуем. */
-  private drawLines(g: CanvasRenderingContext2D, ids: number[], mPerPx: number, maxCls: number) {
-    const mp = this.map, p = mp.lPts; g.lineCap = 'round'; g.lineJoin = 'round';
-    const path = (l: number) => { const s = mp.lStart[l], e = mp.lStart[l + 1]; g.beginPath(); g.moveTo(p[s * 2], p[s * 2 + 1]); for (let i = s + 1; i < e; i++) g.lineTo(p[i * 2], p[i * 2 + 1]); };
-    const stroke = (l: number, col: string, w: number, dash?: number[]) => { g.strokeStyle = col; g.lineWidth = w; if (dash) { g.setLineDash(dash); g.lineCap = 'butt'; } path(l); g.stroke(); if (dash) { g.setLineDash([]); g.lineCap = 'round'; } };
-    const detail = mPerPx < 2.5, fine = mPerPx < 0.7;
-    const roads: number[] = [], rails: number[] = [];
-    for (const l of ids) {
-      const c = mp.lCls[l] & 0x3f;
-      if (c >= 9) { stroke(l, AREA_COL[0], Math.max(c === 9 ? 14 : 3, mPerPx)); continue; } // реки и ручьи
-      if (mp.lineOnBridge[l]) { if (detail) stroke(l, 'rgba(0,0,0,0.16)', (c === 8 ? 6 : ROAD_W[c]) + 4); continue; } // мост — отдельная 3D-модель, на земле только тень
-      if (c === 8) { if (detail || mPerPx <= 6) rails.push(l); } else if (c <= maxCls) roads.push(l);
-    }
-    const W = (l: number) => { const c = mp.lCls[l] & 0x3f; return Math.max(ROAD_W[c], mPerPx * (c <= 1 ? 1.6 : 1.1)); };
-    // слоями, чтобы на перекрёстках асфальт перекрывал бордюры соседних дорог
-    if (detail) for (const l of roads) { const c = mp.lCls[l] & 0x3f; stroke(l, c <= 4 ? '#9a978f' : '#85837c', W(l) + (c <= 4 ? (fine ? 6 : 4) : 1.6)); }      // тротуар
-    if (fine) for (const l of roads) if ((mp.lCls[l] & 0x3f) <= 4) stroke(l, '#5f5d58', W(l) + 0.7);                                                       // бордюр
-    for (const l of roads) { const c = mp.lCls[l] & 0x3f; stroke(l, c <= 1 ? '#4a4b4e' : c <= 4 ? '#545558' : '#6a6964', W(l)); }
-    if (detail) for (const l of roads) { // разметка
-      const c = mp.lCls[l] & 0x3f, w = ROAD_W[c], white = 'rgba(238,238,228,0.8)', asph = c <= 1 ? '#4a4b4e' : '#545558';
-      if (c > 4) continue;
-      if (!fine) { if (c <= 3) stroke(l, white, 0.35, c <= 1 ? undefined : [4, 6]); continue; }
-      // пары линий, симметричных оси: широкая белая полоса, середина закрывается асфальтом — от краёв к оси
-      const pairs: [number, boolean][] = c === 0 ? [[w / 2 - 0.6, false], [7.2, true], [3.6, true]] : c === 1 ? [[w / 2 - 0.6, false], [3.6, true]] : c === 2 ? [[3.25, true]] : [];
-      for (const [off, dashed] of pairs) { stroke(l, white, off * 2 + 0.16, dashed ? [3, 7] : undefined); stroke(l, asph, off * 2 - 0.16); }
-      if (c <= 2) { stroke(l, white, 0.62); stroke(l, asph, 0.3); } else stroke(l, white, 0.15, [3, 5]); // двойная сплошная / прерывистая осевая
-    }
-    if (fine) for (const l of roads) { // пешеходные переходы у концов улиц
-      const c = mp.lCls[l] & 0x3f, s = mp.lStart[l], e = mp.lStart[l + 1]; if (c < 2 || c > 4) continue;
-      let len = 0; for (let i = s + 1; i < e; i++) len += Math.hypot(p[i * 2] - p[i * 2 - 2], p[i * 2 + 1] - p[i * 2 - 1]);
-      if (len < 70) continue;
-      for (const [a, b] of [[s, s + 1], [e - 1, e - 2]]) {
-        let dx = p[b * 2] - p[a * 2], dz = p[b * 2 + 1] - p[a * 2 + 1]; const d = Math.hypot(dx, dz); if (d < 16) continue; dx /= d; dz /= d;
-        const cx = p[a * 2] + dx * 13, cz = p[a * 2 + 1] + dz * 13, w = ROAD_W[c];
-        g.fillStyle = 'rgba(240,240,232,0.85)'; g.beginPath();
-        for (let k = -w / 2 + 0.4; k < w / 2 - 0.4; k += 1.1) { // полосы зебры вдоль движения
-          const ox = cx - dz * k, oz = cz + dx * k;
-          g.moveTo(ox - dx * 1.6, oz - dz * 1.6); g.lineTo(ox + dx * 1.6, oz + dz * 1.6); g.lineTo(ox + dx * 1.6 - dz * 0.5, oz + dz * 1.6 + dx * 0.5); g.lineTo(ox - dx * 1.6 - dz * 0.5, oz - dz * 1.6 + dx * 0.5); g.closePath();
-        }
-        g.fill();
-      }
-    }
-    for (const l of rails) { // железная дорога: балласт, шпалы, рельсы
-      if (!detail) { stroke(l, '#4a4744', Math.max(3.2, mPerPx * 0.9)); continue; }
-      stroke(l, '#6b655d', 4.4);
-      if (fine) { stroke(l, '#3d342c', 2.7, [0.26, 0.4]); stroke(l, '#b9bcc0', 1.62); stroke(l, '#6b655d', 1.36); stroke(l, '#3d342c', 1.36, [0.26, 0.4]); }
-      else { stroke(l, '#4a4039', 2.6, [0.8, 1.2]); stroke(l, '#8d8f92', 1.7); stroke(l, '#5a534c', 1.0); }
-    }
-  }
-  /** Мягкое затемнение земли у оснований домов — здания перестают «висеть» над землёй. */
-  private drawContact(g: CanvasRenderingContext2D, cx: number, cz: number, r: number, pxPerM: number) {
-    const mp = this.map, p = mp.bPts;
-    g.save(); g.shadowColor = 'rgba(0,0,0,0.5)'; g.shadowBlur = Math.max(2, 3.2 * pxPerM); g.fillStyle = 'rgba(52,50,46,0.9)'; g.beginPath(); let n = 0;
-    for (const b of mp.buildingsNear(cx, cz, r)) {
-      if (!mp.bH[b]) continue; // дома нет: заменён отдельной моделью
-      const a = mp.bStart[b], e = mp.bStart[b + 1];
-      g.moveTo(p[a * 2], p[a * 2 + 1]); for (let i = a + 1; i < e; i++) g.lineTo(p[i * 2], p[i * 2 + 1]); g.closePath();
-      if (++n % 300 === 0) { g.fill(); g.beginPath(); }
-    }
-    g.fill(); g.restore();
-  }
-
-  /** Тайл земли: size — сторона в метрах (1000 или 250), t — индекс километрового тайла, из которого берутся объекты. */
-  private makeTile(x0: number, z0: number, size: number, res: number, t: number, level: number): Tile {
-    const mp = this.map, m = mp.meta;
-    const cv = document.createElement('canvas'); cv.width = cv.height = res;
-    const g = cv.getContext('2d')!; const s = res / size;
-    g.setTransform(s, 0, 0, s, -x0 * s, -z0 * s);
-    g.fillStyle = LAND; g.fillRect(x0, z0, size, size);
-    this.drawAreas(g, mp.tileA[t], 1 / s); this.drawContact(g, x0 + size / 2, z0 + size / 2, size * 0.72 + 60, s); this.drawLines(g, mp.tileL[t], 1 / s, 5);
-    const tex = new THREE.CanvasTexture(cv); tex.flipY = false; tex.anisotropy = this.maxAniso;
+  /** Текстура готова: собираем сетку тайла. */
+  private onTile(key: string, bitmap: ImageBitmap) {
+    const rq = this.pending.get(key); if (!rq) { bitmap.close(); return; } this.pending.delete(key);
+    const { store, x0, z0, size, level } = rq, mp = this.map, m = mp.meta;
+    const tex = new THREE.Texture(bitmap as unknown as HTMLImageElement); tex.flipY = false; tex.anisotropy = this.maxAniso; tex.needsUpdate = true;
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     const c = m.cell, q = Math.round(size / c), n = q + 1, geo = new THREE.BufferGeometry(), pos = new Float32Array(n * n * 3), uv = new Float32Array(n * n * 2), nr = new Float32Array(n * n * 3), idx = new Uint16Array(q * q * 6);
     for (let j = 0, k = 0; j < n; j++) for (let i = 0; i < n; i++, k++) {
@@ -225,7 +135,8 @@ export class Ground {
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     const mesh = new THREE.Mesh(geo, groundMaterial(tex, level)); mesh.renderOrder = level;
     this.group.add(mesh);
-    return { mesh, tex, used: this.frame };
+    store.set(rq.t, { mesh, tex, used: this.frame });
+    this.drop(store, store === this.detail ? (2 * this.q.detailRadius + 3) ** 2 + 8 : 60);
   }
   private drop(store: Map<number, Tile>, cap: number) {
     if (store.size > cap) for (const [t, d] of store) if (d.used < this.frame - 120) {
@@ -243,9 +154,9 @@ export class Ground {
     for (let j = cj - R; j <= cj + R; j++) for (let i = ci - R; i <= ci + R; i++) {
       if (i < 0 || j < 0 || i >= mp.tilesX || j >= mp.tilesZ) continue;
       const t = j * mp.tilesX + i, d = this.detail.get(t);
-      if (d) d.used = this.frame; else { const dd = (i - ci) ** 2 + (j - cj) ** 2; if (dd < bestD) { bestD = dd; best = t; } }
+      if (d) d.used = this.frame; else if (!this.pending.has('1:' + t)) { const dd = (i - ci) ** 2 + (j - cj) ** 2; if (dd < bestD) { bestD = dd; best = t; } }
     }
-    if (best >= 0) { this.detail.set(best, this.makeTile(m.x0 + (best % mp.tilesX) * TILE, m.z0 + ((best / mp.tilesX) | 0) * TILE, TILE, this.q.detailRes, best, 1)); this.drop(this.detail, (2 * this.q.detailRadius + 3) ** 2 + 8); return; }
+    if (best >= 0) { this.request(this.detail, best, m.x0 + (best % mp.tilesX) * TILE, m.z0 + ((best / mp.tilesX) | 0) * TILE, TILE, this.q.detailRes, best, 1); return; }
     // ближние тайлы: только когда камера низко и километровые уже готовы
     if (!this.q.microRes || camDist > 1500) return;
     const k = TILE / MICRO, nx = mp.tilesX * k, nz = mp.tilesZ * k, mi = Math.floor((tx - m.x0) / MICRO), mj = Math.floor((tz - m.z0) / MICRO), MR = camDist < 500 ? 2 : 3;
@@ -253,8 +164,8 @@ export class Ground {
     for (let j = mj - MR; j <= mj + MR; j++) for (let i = mi - MR; i <= mi + MR; i++) {
       if (i < 0 || j < 0 || i >= nx || j >= nz) continue;
       const t = j * nx + i, d = this.micro.get(t);
-      if (d) d.used = this.frame; else { const dd = (i - mi) ** 2 + (j - mj) ** 2; if (dd < bestD) { bestD = dd; best = t; } }
+      if (d) d.used = this.frame; else if (!this.pending.has('2:' + t)) { const dd = (i - mi) ** 2 + (j - mj) ** 2; if (dd < bestD) { bestD = dd; best = t; } }
     }
-    if (best >= 0) { const i = best % nx, j = (best / nx) | 0; this.micro.set(best, this.makeTile(m.x0 + i * MICRO, m.z0 + j * MICRO, MICRO, this.q.microRes, ((j / k) | 0) * mp.tilesX + ((i / k) | 0), 2)); this.drop(this.micro, 60); }
+    if (best >= 0) { const i = best % nx, j = (best / nx) | 0; this.request(this.micro, best, m.x0 + i * MICRO, m.z0 + j * MICRO, MICRO, this.q.microRes, ((j / k) | 0) * mp.tilesX + ((i / k) | 0), 2); }
   }
 }
