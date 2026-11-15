@@ -23,6 +23,9 @@
   "description": "VENOM — оборона Киева",
   "author": "venom",
   "main": "electron/main.cjs",
+  "venom": {
+    "updates": ["Ellderly/venom", "Ellderly/venom-releases"]
+  },
   "build": {
     "appId": "game.venom",
     "productName": "VENOM",

@@ -91,6 +91,10 @@ let port = PORT;
 async function api(req, res, p) {
   if (p === '/api/info') return json(res, 200, { host: isLocal(req), addrs: isLocal(req) ? lanAddrs() : [], port, world: world?.name ?? '', players: players.size });
   if (!isLocal(req)) return json(res, 403, { error: 'Только для хоста' }); // мирами управляет только тот, у кого запущена игра
+  if (p === '/api/update') { // обновление программы: есть только в VENOM.exe (см. electron/updater.cjs)
+    const u = globalThis.venomUpdater; if (!u) return json(res, 200, { available: false, current: '' });
+    return json(res, 200, req.method === 'POST' ? await u.install() : await u.check());
+  }
   const m = p.match(/^\/api\/worlds(?:\/([a-z0-9]+)(\/open)?)?$/);
   if (!m) return json(res, 404, {});
   const [, id, open] = m;

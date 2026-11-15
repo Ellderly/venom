@@ -121,6 +121,9 @@ kbd { background: #222a31; border: 1px solid var(--line); border-radius: 4px; pa
 #opBar .tg.dead { border-color: #777; color: #999; text-decoration: line-through; }
 .lbl.tgt { background: rgba(120,90,0,.9); border-color: #ffd24a; }
 .lbl.tgt.dead { background: rgba(40,40,40,.85); border-color: #999; text-decoration: line-through; }
+#update { margin-bottom: 12px; padding: 12px 14px; border-color: #4aa8ff; }
+#update h3 { margin: 0 0 6px; } #update .notes { white-space: pre-wrap; max-height: 150px; overflow: auto; font-size: 12.5px; opacity: .85; margin: 6px 0 10px; }
+#update .bar { height: 6px; background: rgba(255,255,255,.12); border-radius: 3px; overflow: hidden; margin-top: 8px; } #update .bar i { display: block; height: 100%; background: #4aa8ff; width: 0; }
 .lbl::after { content: ''; position: absolute; left: 50%; bottom: -6px; margin-left: -4px; border: 4px solid transparent; border-top-color: #ff8a70; border-bottom: 0; }
 .lbl.gun::after { border-top-color: #4aa8ff; }
 .lbl.down::after { border-top-color: #999; }
@@ -161,6 +164,7 @@ kbd { background: #222a31; border: 1px solid var(--line); border-radius: 4px; pa
     <h1>VENOM</h1><p>Оборона Киева</p>
     <div id="nickRow"><span class="dim">Ваш ник</span><input type="text" id="nick" maxlength="20" placeholder="Игрок" autocomplete="off" spellcheck="false"></div>
     <div id="mMain">
+      <div id="update" class="panel hidden"></div>
       <button class="big" id="btnPlay">Играть<small>Ваши миры: продолжить или создать новый</small></button>
       <button class="big" id="btnJoin">Подключиться<small>К сессии друга по адресу</small></button>
       <button class="big" id="btnArsenal">Арсенал<small>Каталог всех средств атаки и обороны</small></button>

@@ -15,6 +15,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm version 0.1.${{ github.run_number }} --no-git-tag-version --allow-same-version   # программа знает свою версию — по ней ищет обновления
       - run: npm run build
       - run: npm install --no-save electron@33.2.0 electron-builder@25.1.8
       - run: npx electron-builder --win portable --publish never
@@ -27,6 +28,21 @@ jobs:
           tag_name: v0.1.${{ github.run_number }}
           name: VENOM 0.1.${{ github.run_number }}
           target_commitish: ${{ github.sha }}
-          body: Скачайте VENOM.exe и запустите. Установка не нужна.
+          body_path: release-notes.md   # что нового — показывается и в меню игры на плашке обновления
+          files: release/VENOM.exe
+          make_latest: true
+      # Репозиторий закрытый, и игра без входа в GitHub его релизы не видит. Если задан секрет RELEASES_TOKEN,
+      # тот же релиз выкладывается в открытый репозиторий Ellderly/venom-releases — оттуда игра берёт обновления.
+      - name: Publish to the public releases repository
+        if: env.RELEASES_TOKEN != ''
+        env:
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: Ellderly/venom-releases
+          token: ${{ secrets.RELEASES_TOKEN }}
+          tag_name: v0.1.${{ github.run_number }}
+          name: VENOM 0.1.${{ github.run_number }}
+          body_path: release-notes.md
           files: release/VENOM.exe
           make_latest: true

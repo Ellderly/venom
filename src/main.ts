@@ -561,7 +561,27 @@ function renderCatalog() {
   }
   const first = Object.values(UNITS)[0]; if (first) { cards.show($('catCard'), first, []); list.querySelector('.tile')?.classList.add('on'); }
 }
+/** Плашка «Новая версия» в главном меню: что добавили и кнопка «Обновить». Работает в программе VENOM.exe. */
+interface Upd { available: boolean; current: string; latest?: string; notes?: string; size?: number; canInstall?: boolean; state?: string; progress?: number; error?: string }
+async function checkUpdate() {
+  const box = $('update'); let u: Upd;
+  try { const r = await fetch('./api/update', { cache: 'no-store' }); if (!r.ok) return; u = await r.json(); } catch { return; }
+  if (u.current) $('ver').textContent = `Версия ${u.current} · сборка ${__BUILD__}`;
+  const draw = (v: Upd) => {
+    const busy = v.state === 'downloading' || v.state === 'restarting';
+    box.classList.toggle('hidden', !v.available && !busy); if (!v.available && !busy) return;
+    box.innerHTML = `<h3>Новая версия ${esc(v.latest ?? '')}</h3><div class="dim">У вас ${esc(v.current)} · размер ${((v.size ?? 0) / 1e6).toFixed(0)} МБ</div><div class="notes">${esc(v.notes ?? '')}</div>`
+      + (v.state === 'restarting' ? '<b>Готово — программа перезапускается…</b>' : v.state === 'downloading' ? `<b>Скачивание: ${Math.round((v.progress ?? 0) * 100)} %</b><div class="bar"><i style="width:${(v.progress ?? 0) * 100}%"></i></div>`
+        : (v.canInstall ? '<button class="on" id="updGo">Обновить</button>' : '<span class="note">Скачайте новую версию со страницы релизов.</span>') + (v.error ? ` <span class="note" style="color:#ff8a70">${esc(v.error)}</span>` : ''));
+    const go = box.querySelector<HTMLElement>('#updGo'); if (go) go.onclick = async () => {
+      try { draw(await (await fetch('./api/update', { method: 'POST', cache: 'no-store' })).json()); } catch { return; }
+      const timer = window.setInterval(async () => { try { const s2: Upd = await (await fetch('./api/update', { cache: 'no-store' })).json(); draw(s2); if (s2.state === 'error') clearInterval(timer); } catch { clearInterval(timer); } }, 500); // после перезапуска сервер пропадёт — опрос остановится сам
+    };
+  };
+  draw(u);
+}
 function initMenu() {
+  void checkUpdate();
   const n = $<HTMLInputElement>('nick'); n.value = S.nick; n.onchange = saveNick;
   $('btnPlay').onclick = () => { menuScreen('mWorlds'); void renderWorlds(); };
   $('btnJoin').onclick = () => { menuScreen('mJoin'); const a = $<HTMLInputElement>('netAddr'); if (!a.value) a.value = S.addr || (location.protocol === 'http:' && !worlds.hosted ? location.host : ''); a.focus(); };
