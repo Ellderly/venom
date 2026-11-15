@@ -4,7 +4,8 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
 app.whenReady().then(async () => {
-  process.env.VENOM_SAVE = path.join(app.getPath('userData'), 'venom-save.json'); // %APPDATA%\\VENOM
+  process.env.VENOM_SAVE = path.join(app.getPath('userData'), 'venom-save.json'); // %APPDATA%\\VENOM, старый формат
+  process.env.VENOM_WORLDS = path.join(app.getPath('userData'), 'worlds');
   const { ready } = await import(pathToFileURL(path.join(__dirname, '..', 'server', 'server.mjs')).href);
   const port = await ready;
   await session.defaultSession.clearCache(); // после обновления не должна открываться старая версия

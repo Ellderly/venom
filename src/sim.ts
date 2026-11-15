@@ -4,7 +4,7 @@ import { MapData } from './map';
 import { UNITS } from './units';
 
 export interface Launch {
-  id: number; unit: string; by: string;
+  id: number; unit: string; by: string; pid?: number;   // by — ник запустившего, pid — его номер в сессии
   sx: number; sz: number; tx: number; tz: number;
   t0: number;            // момент запуска по часам сессии, с
   seed: number;

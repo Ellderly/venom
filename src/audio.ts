@@ -1,13 +1,19 @@
 // Звук. По умолчанию всё синтезируется (WebAudio). Если в папке sounds/ лежат реальные записи
 // и они перечислены в sounds/list.json (geran — зацикленный мотор, explosion — взрыв, siren — сирена), используются они.
-type Voice = { src: AudioBufferSourceNode; gain: GainNode; lp: BiquadFilterNode; pan: StereoPannerNode };
-export interface Heard { dist: number; closing: number; pan: number; dive: number; seed: number }
+// Звук. Записи берутся из sounds/manifest.json (слот → список файлов-вариантов); чего там нет — синтезируется (WebAudio).
+// Манифест пишет tools/import_sounds.py. Юниты ссылаются на слоты по имени (units.ts → sounds).
+type Chain = { src: AudioBufferSourceNode; gain: GainNode; lp: BiquadFilterNode };
+type Voice = { key: string; near: Chain; far: Chain; pan: StereoPannerNode };
+export interface Heard { dist: number; closing: number; pan: number; dive: number; seed: number; near?: string; far?: string }
+export interface BlastSounds { blastNear?: string; blastFar?: string; debris?: string }
 
 export class Sound {
   private ctx: AudioContext | null = null; private master!: GainNode; private wet!: GainNode;
   private voices: Voice[] = []; private engBuf!: AudioBuffer; private boomBuf!: AudioBuffer; private crackBuf!: AudioBuffer; private debrisBuf!: AudioBuffer;
-  private real: Record<string, AudioBuffer> = {};
+  private slots: Record<string, AudioBuffer[]> = {};
   volume = 0.7;
+  /** Сколько записей загружено — показывается в настройках. */
+  get recorded() { return Object.values(this.slots).reduce((n, a) => n + a.length, 0); }
 
   /** Браузеры разрешают звук только после действия пользователя. */
   unlock() {
@@ -21,22 +27,23 @@ export class Sound {
       for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); let lp = 0; for (let i = 0; i < d.length; i++) { const t = i / d.length; lp += ((Math.random() * 2 - 1) - lp) * (0.5 - 0.42 * t); d[i] = lp * Math.pow(1 - t, 2.6) * (i < 600 ? i / 600 : 1); } }
       const conv = c.createConvolver(); conv.buffer = ir; this.wet = c.createGain(); this.wet.gain.value = 0.55; this.wet.connect(conv); conv.connect(this.master);
       this.engBuf = this.makeEngine(c); this.makeBlast(c);
-      for (let i = 0; i < 4; i++) this.voices.push(this.makeVoice(c, this.engBuf));
-      void this.loadReal();
+      for (let i = 0; i < 4; i++) this.voices.push(this.makeVoice(c, '', this.engBuf, this.engBuf));
+      void this.loadRecorded();
     } catch { this.ctx = null; }
   }
 
-  /** Реальные записи перечисляются в sounds/list.json, например {"geran": "geran.mp3"}. */
-  private async loadReal() {
-    try {
-      const list = await (await fetch('./sounds/list.json')).json() as Record<string, string>;
-      for (const [name, file] of Object.entries(list)) {
-        if (!['geran', 'explosion', 'siren'].includes(name)) continue;
-        this.real[name] = await this.ctx!.decodeAudioData(await (await fetch(`./sounds/${file}`)).arrayBuffer());
-        if (name === 'geran') { for (const v of this.voices) { v.src.stop(); v.gain.disconnect(); } this.voices = [0, 1, 2, 3].map(() => this.makeVoice(this.ctx!, this.real.geran)); }
+  private async loadRecorded() {
+    let man: Record<string, string[] | string> = {};
+    try { man = await (await fetch('./sounds/manifest.json')).json(); } catch { /* манифеста нет */ }
+    await Promise.all(Object.entries(man).map(async ([slot, files]) => {
+      if (slot.startsWith('_')) return;
+      for (const f of Array.isArray(files) ? files : [files]) {
+        try { (this.slots[slot] ??= []).push(await this.ctx!.decodeAudioData(await (await fetch(`./sounds/${f}`)).arrayBuffer())); } catch { /* файл не прочитался — пропускаем */ }
       }
-    } catch { /* записей нет — остаётся синтез */ }
+    }));
+    for (const v of this.voices) v.key = '?'; // голоса пересоберутся с записями при следующем кадре
   }
+  private pick(slot?: string) { const a = slot ? this.slots[slot] : undefined; return a?.length ? a[(Math.random() * a.length) | 0] : null; }
 
   /** Мотор: двухтактный оппозитник. Импульсы вспышек с неровностью по периоду и силе + гул винта. */
   private makeEngine(c: AudioContext) {
@@ -56,15 +63,21 @@ export class Sound {
     const out = c.createBuffer(1, len - fade, sr); out.copyToChannel(d.subarray(0, len - fade), 0); return out;
   }
 
-  private makeVoice(c: AudioContext, buf: AudioBuffer): Voice {
+  private makeChain(c: AudioContext, buf: AudioBuffer, out: AudioNode): Chain {
     const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
     const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 4000; lp.Q.value = 0.4;
     const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 70;
-    const gain = c.createGain(); gain.gain.value = 0; const pan = c.createStereoPanner();
-    src.connect(hp); hp.connect(lp); lp.connect(gain); gain.connect(pan); pan.connect(this.master);
-    const send = c.createGain(); send.gain.value = 0.25; pan.connect(send); send.connect(this.wet);
-    src.start(0, Math.random() * buf.duration); return { src, gain, lp, pan };
+    const gain = c.createGain(); gain.gain.value = 0;
+    src.connect(hp); hp.connect(lp); lp.connect(gain); gain.connect(out);
+    src.start(0, Math.random() * buf.duration); return { src, gain, lp };
   }
+  /** Голос цели: два слоя (ближний и дальний), между ними плавный переход по расстоянию. */
+  private makeVoice(c: AudioContext, key: string, near: AudioBuffer, far: AudioBuffer): Voice {
+    const pan = c.createStereoPanner(); pan.connect(this.master);
+    const send = c.createGain(); send.gain.value = 0.25; pan.connect(send); send.connect(this.wet);
+    return { key, pan, near: this.makeChain(c, near, pan), far: this.makeChain(c, far, pan) };
+  }
+  private dropVoice(v: Voice) { for (const ch of [v.near, v.far]) { try { ch.src.stop(); } catch { /* уже остановлен */ } ch.gain.disconnect(); } v.pan.disconnect(); }
 
   private makeBlast(c: AudioContext) {
     const sr = c.sampleRate;
@@ -83,16 +96,27 @@ export class Sound {
   engines(list: Heard[]) {
     const c = this.ctx; if (!c) return; const t = c.currentTime;
     list.sort((a, b) => a.dist - b.dist);
-    this.voices.forEach((v, i) => {
-      const h = list[i];
-      if (!h || h.dist > 5000) { v.gain.gain.setTargetAtTime(0, t, 0.2); return; }
-      const g = Math.min(1, 140 / Math.max(140, h.dist)) * (0.5 + 0.5 * h.dive) * (1 - h.dist / 5000);
-      v.gain.gain.setTargetAtTime(g * 0.9, t, 0.12);
-      v.lp.frequency.setTargetAtTime(Math.max(350, 7000 * Math.exp(-h.dist / 900)), t, 0.2);   // вдали остаётся только низкий гул
+    const sm = (a: number, b: number, x: number) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
+    for (let i = 0; i < this.voices.length; i++) {
+      let v = this.voices[i]; const h = list[i];
+      if (!h || h.dist > 9000) { v.near.gain.gain.setTargetAtTime(0, t, 0.2); v.far.gain.gain.setTargetAtTime(0, t, 0.2); continue; }
+      const key = `${h.near ?? ''}|${h.far ?? ''}`;
+      if (v.key !== key) { // другой тип цели или догрузились записи
+        const nb = this.slots[h.near ?? '']?.[0] ?? this.engBuf, fb = this.slots[h.far ?? '']?.[0] ?? nb;
+        this.dropVoice(v); v = this.voices[i] = this.makeVoice(c, key, nb, fb);
+      }
+      const realFar = !!this.slots[h.far ?? '']?.length, x = sm(350, 1600, h.dist);
+      const g = Math.min(1, 140 / Math.max(140, h.dist)) * (0.5 + 0.5 * h.dive);
+      v.near.gain.gain.setTargetAtTime(g * 0.9 * (1 - x) * (1 - h.dist / 9000), t, 0.12);
+      // дальний слой: настоящая запись «над городом» слышна дальше и не глушится фильтром
+      v.far.gain.gain.setTargetAtTime(x * (realFar ? 0.55 * Math.min(1, 1800 / h.dist) : g * 0.9) * (1 - sm(5000, 9000, h.dist)), t, 0.25);
+      v.near.lp.frequency.setTargetAtTime(Math.max(350, 7000 * Math.exp(-h.dist / 900)), t, 0.2);
+      v.far.lp.frequency.setTargetAtTime(realFar ? Math.max(900, 6000 * Math.exp(-h.dist / 4000)) : Math.max(300, 2500 * Math.exp(-h.dist / 1500)), t, 0.2);
       const doppler = 1 + Math.max(-0.14, Math.min(0.14, h.closing / 340));
-      v.src.playbackRate.setTargetAtTime((0.96 + (h.seed % 1) * 0.08) * doppler * (1 + 0.42 * h.dive), t, 0.15);       // в пикировании мотор «воет»
+      const rate = (0.96 + (h.seed % 1) * 0.08) * doppler * (1 + 0.42 * h.dive); // в пикировании мотор «воет»
+      v.near.src.playbackRate.setTargetAtTime(rate, t, 0.15); v.far.src.playbackRate.setTargetAtTime(rate, t, 0.15);
       v.pan.pan.setTargetAtTime(Math.max(-0.9, Math.min(0.9, h.pan)), t, 0.1);
-    });
+    }
   }
 
   private play(buf: AudioBuffer, when: number, gain: number, lpFreq: number, rate = 1, wet = 0.6, hpFreq = 0) {
@@ -103,10 +127,16 @@ export class Sound {
     out.connect(g); g.connect(this.master); const w = c.createGain(); w.gain.value = wet; g.connect(w); w.connect(this.wet); s.start(when);
   }
 
-  explosion(dist: number, tnt: number, collapse = false) {
+  explosion(dist: number, tnt: number, collapse = false, snd: BlastSounds = {}) {
     const c = this.ctx; if (!c) return;
     const t = c.currentTime + Math.min(dist / 340, 12), size = Math.cbrt(tnt) / 4, att = Math.min(1, 250 / Math.max(250, dist));
-    if (this.real.explosion) { this.play(this.real.explosion, t, 1.2 * att * size, Math.max(300, 16000 * Math.exp(-dist / 1500)), 1, 0.4); return; }
+    const rec = dist > 1200 ? this.pick(snd.blastFar) ?? this.pick(snd.blastNear) : this.pick(snd.blastNear) ?? this.pick(snd.blastFar);
+    if (rec) {
+      this.play(rec, t, 1.3 * Math.sqrt(att) * size, Math.max(300, 16000 * Math.exp(-dist / 1500)), 0.94 + Math.random() * 0.12, 0.4);
+      const deb = dist < 1800 ? this.pick(snd.debris) : null;
+      if (deb) this.play(deb, t + 0.4, (collapse ? 0.9 : 0.45) * att, 6000, 0.9 + Math.random() * 0.2, 0.5);
+      return;
+    }
     const air = Math.exp(-dist / 1200); // воздух съедает верхние частоты
     if (dist < 2500) this.play(this.crackBuf, t, 1.5 * att * air * size, 9000, 1 / (0.8 + size * 0.2), 0.3, 500);
     this.play(this.boomBuf, t, 2.2 * Math.sqrt(att) * size, Math.max(90, 2600 * air), 1 / (0.75 + size * 0.25), 0.8);
@@ -115,7 +145,7 @@ export class Sound {
 
   siren() {
     const c = this.ctx; if (!c) return; const t = c.currentTime;
-    if (this.real.siren) { this.play(this.real.siren, t, 0.35, 6000, 1, 0.5); return; }
+    const rec = this.pick('siren'); if (rec) { this.play(rec, t, 0.35, 6000, 1, 0.5); return; }
     const g = c.createGain(), lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1500;
     for (const [mul, vol, type] of [[1, 0.5, 'triangle'], [2, 0.16, 'sine'], [3.01, 0.07, 'sine']] as const) { // электромеханическая сирена: ровный вой с гармониками
       const o = c.createOscillator(), og = c.createGain(); o.type = type; og.gain.value = vol;

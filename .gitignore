@@ -2,3 +2,4 @@ node_modules
 dist
 *.log
 venom-save.json
+venom-worlds

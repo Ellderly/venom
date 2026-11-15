@@ -1,6 +1,7 @@
 // Камера как в градостроительных симуляторах: точка на земле + дистанция, поворот, наклон.
 import * as THREE from 'three';
 import { MapData } from './map';
+import { S } from './settings';
 
 export class CityCamera {
   cam = new THREE.PerspectiveCamera(45, 1, 1, 100000);
@@ -10,11 +11,13 @@ export class CityCamera {
   private drag: { btn: number; x: number; y: number; moved: number } | null = null;
   follow: (() => THREE.Vector3 | null) | null = null;
   shake = 0;
+  locked = false; // открыто окно или карта — клавиши камеры не действуют
+  get yawNow() { return this.syaw; }
   onClick: ((x: number, y: number) => void) | null = null;
   readonly MIN = 25; readonly MAX = 90000;
 
   constructor(private el: HTMLElement, private map: MapData) {
-    window.addEventListener('keydown', e => { if ((e.target as HTMLElement).tagName !== 'INPUT') this.keys.add(e.code); });
+    window.addEventListener('keydown', e => { if ((e.target as HTMLElement).tagName !== 'INPUT' && !this.locked) this.keys.add(e.code); });
     window.addEventListener('keyup', e => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
     el.addEventListener('contextmenu', e => e.preventDefault());
@@ -60,14 +63,15 @@ export class CityCamera {
   flyTo(x: number, z: number, dist?: number) { this.tx = x; this.tz = z; if (dist) this.dist = dist; this.follow = null; }
 
   update(dt: number) {
-    const k = this.keys, sp = this.dist * 1.1 * dt * (k.has('ShiftLeft') ? 2.5 : 1);
+    const ks = this.keys, K = S.keys, k = { has: (a: string) => ks.has(K[a]) };
+    const sp = this.dist * 1.1 * dt * (k.has('fast') ? 2.5 : 1);
     let mx = 0, mz = 0;
-    if (k.has('KeyW') || k.has('ArrowUp')) mz -= 1; if (k.has('KeyS') || k.has('ArrowDown')) mz += 1;
-    if (k.has('KeyA') || k.has('ArrowLeft')) mx -= 1; if (k.has('KeyD') || k.has('ArrowRight')) mx += 1;
+    if (k.has('fwd') || ks.has('ArrowUp')) mz -= 1; if (k.has('back') || ks.has('ArrowDown')) mz += 1;
+    if (k.has('left') || ks.has('ArrowLeft')) mx -= 1; if (k.has('right') || ks.has('ArrowRight')) mx += 1;
     if (mx || mz) { this.follow = null; this.tx += (Math.cos(this.yaw) * mx + Math.sin(this.yaw) * mz) * sp; this.tz += (-Math.sin(this.yaw) * mx + Math.cos(this.yaw) * mz) * sp; }
-    if (k.has('KeyQ')) this.yaw += dt * 1.4; if (k.has('KeyE')) this.yaw -= dt * 1.4;
-    if (k.has('KeyR')) this.pitch = Math.min(1.55, this.pitch + dt); if (k.has('KeyF')) this.pitch = Math.max(0.08, this.pitch - dt);
-    if (k.has('KeyZ')) this.dist = Math.max(this.MIN, this.dist * Math.exp(-dt * 1.8)); if (k.has('KeyX')) this.dist = Math.min(this.MAX, this.dist * Math.exp(dt * 1.8));
+    if (k.has('rotL')) this.yaw += dt * 1.4; if (k.has('rotR')) this.yaw -= dt * 1.4;
+    if (k.has('tiltUp')) this.pitch = Math.min(1.55, this.pitch + dt); if (k.has('tiltDown')) this.pitch = Math.max(0.08, this.pitch - dt);
+    if (k.has('zoomIn')) this.dist = Math.max(this.MIN, this.dist * Math.exp(-dt * 1.8)); if (k.has('zoomOut')) this.dist = Math.min(this.MAX, this.dist * Math.exp(dt * 1.8));
     const m = this.map.meta; let ty: number | null = null;
     const f = this.follow?.();
     if (f) { this.tx = f.x; this.tz = f.z; ty = f.y; } else if (this.follow) this.follow = null;

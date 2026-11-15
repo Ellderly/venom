@@ -34,6 +34,8 @@ export class Ground {
   group = new THREE.Group();
   private detail = new Map<number, { mesh: THREE.Mesh; tex: THREE.CanvasTexture; used: number }>();
   private frame = 0;
+  /** Обзорная картинка всей карты — её же показывают тактическая карта и мини-карта. */
+  overview!: HTMLCanvasElement;
 
   constructor(private map: MapData, private q: Quality, private maxAniso: number) {}
 
@@ -41,7 +43,7 @@ export class Ground {
   async buildOverview(progress: (p: number) => void) {
     const m = this.map.meta, W = m.x1 - m.x0, H = m.z1 - m.z0;
     const cw = this.q.overviewRes, ch = Math.round(cw * H / W);
-    const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+    const cv = this.overview = document.createElement('canvas'); cv.width = cw; cv.height = ch;
     const g = cv.getContext('2d')!; const s = cw / W;
     g.setTransform(s, 0, 0, s, -m.x0 * s, -m.z0 * s);
     g.fillStyle = LAND; g.fillRect(m.x0, m.z0, W, H);
