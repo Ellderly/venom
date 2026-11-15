@@ -40,7 +40,8 @@ export function planLaunch(L: Launch, map: MapData) {
   L.cruiseY = top + agl; L.dur = D / u.speed;
   const s: State = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 };
   const tDive = Math.max(0, L.dur - (agl + 150) / Math.tan(u.diveDeg * Math.PI / 180) / u.speed - 2);
-  for (let t = tDive; t < L.dur + 5; t += 0.02) {
+  const step = Math.min(0.02, 1 / u.speed); // не больше метра за шаг: быстрая цель не должна проскочить стену или мост
+  for (let t = tDive; t < L.dur + 5; t += step) {
     trajectory(L, map, t, s);
     const g = map.heightAt(s.x, s.z), b = map.buildingAt(s.x, s.z);
     const hitB = b >= 0 && (map.solid?.(b, s.x, s.y, s.z) ?? s.y <= g + map.bH[b] / 10);

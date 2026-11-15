@@ -6,7 +6,7 @@ import { Buildings } from './buildings';
 import { CityCamera } from './camera';
 import { FX } from './fx';
 import { Sound, Heard } from './audio';
-import { buildGeran2 } from './model';
+import { buildGeran2, buildGeran5 } from './model';
 import { UNITS, UnitDef, Side, SIDE_NAME, CATEGORIES, unitsOf } from './units';
 import { Launch, State, trajectory, planLaunch } from './sim';
 import { Destruction } from './voxels';
@@ -38,12 +38,18 @@ let session: Session | null = null, worlds: Worlds;
 let players: Player[] = [];
 let dyn = 1; // динамическое разрешение
 
-interface Drone { L: Launch; mesh: THREE.Group; prop: THREE.Object3D; label: HTMLElement; row: HTMLElement; s: State; eta: number }
+interface Drone { L: Launch; mesh: THREE.Group; prop: THREE.Object3D | null; glow: THREE.Object3D | null; label: HTMLElement; row: HTMLElement; s: State; eta: number }
 const drones = new Map<number, Drone>();
 const hits: { x: number; z: number }[] = [];
 /** Модели юнитов: по одной заготовке на тип, в игру идут копии. */
-const protos: Record<string, THREE.Group> = { geran2: buildGeran2() };
-const cards = new CardView(Object.fromEntries(Object.entries(protos).map(([k, p]) => [k, () => p.clone()])));
+const protos: Record<string, THREE.Group> = { geran2: buildGeran2(), geran5: buildGeran5() };
+const builders: Record<string, () => THREE.Group> = { geran2: buildGeran2, geran5: buildGeran5 };
+const cards = new CardView(builders); // карточке — своя копия модели: у неё другой рендерер и обычный вывод цвета
+// Сцена выводит цвет без преобразования (свои шейдеры отдают готовый sRGB) — стандартным материалам моделей добавляем его сами, иначе они почти чёрные.
+for (const p of Object.values(protos)) p.traverse(o => {
+  const m = (o as THREE.Mesh).material as THREE.Material | undefined; if (!m || !(m as THREE.MeshStandardMaterial).isMeshStandardMaterial) return;
+  m.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <colorspace_fragment>', 'gl_FragColor.rgb = pow(max(gl_FragColor.rgb, 0.0), vec3(1.0 / 2.2));'); };
+});
 
 const me = () => players.find(p => p.id === session?.me) ?? null;
 const mySide = (): Side | null => me()?.side ?? null;
@@ -55,7 +61,9 @@ function resize() {
 window.addEventListener('resize', resize);
 
 // ---------- запуск ----------
-const launchUI = { armed: null as UnitDef | null, step: 0, mode: 60 as number, count: 1, tx: 0, tz: 0 };
+const launchUI = { armed: null as UnitDef | null, step: 0, mode: 60 as number, count: 1, mix: [] as string[], tx: 0, tz: 0 };
+/** Состав роя: выбранный юнит и отмеченные в «Составе» типы той же категории, по очереди. */
+const swarm = (u: UnitDef) => [u, ...launchUI.mix.map(id => UNITS[id]).filter(m => m && m !== u && m.side === u.side)];
 const MODES: [number, string][] = [[0, 'С точки клика'], [15, '15 с'], [60, '1 мин'], [180, '3 мин']];
 const marker = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xff3b1f, transparent: true, opacity: 0.9, depthTest: false, fog: false }));
 const aimLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0xff6a4a, depthTest: false, fog: false }));
@@ -74,9 +82,13 @@ function renderLaunch() {
     : launchUI.mode === 0 ? '<b>Шаг 2.</b> Кликните точку, откуда прилетит цель' : '<b>Шаг 2.</b> Кликните, с какой стороны прилетит цель';
   $('modes').innerHTML = ''; for (const [m, n] of MODES) { const b = el('button', m === launchUI.mode ? 'on' : ''); b.textContent = n; b.onclick = () => { launchUI.mode = m; renderLaunch(); }; $('modes').append(b); }
   $('counts').innerHTML = ''; for (const c of [1, 3, 5, 10]) { const b = el('button', c === launchUI.count ? 'on' : ''); b.textContent = c === 1 ? '1' : `рой ×${c}`; b.onclick = () => { launchUI.count = c; renderLaunch(); }; $('counts').append(b); }
+  const others = unitsOf(u.side).filter(m => m !== u && protos[m.id]), mixRow = $('mixRow'); // состав роя: только когда целей несколько и есть из чего выбирать
+  mixRow.classList.toggle('hidden', launchUI.count < 2 || !others.length); $('mix').innerHTML = '';
+  for (const m of others) { const on = launchUI.mix.includes(m.id), b = el('button', on ? 'on' : ''); b.textContent = '+ ' + m.name; b.title = `Добавить в рой: ${m.name}`; b.onclick = () => { launchUI.mix = on ? launchUI.mix.filter(i => i !== m.id) : [...launchUI.mix, m.id]; renderLaunch(); }; $('mix').append(b); }
   const km = launchUI.mode * u.speed / 1000;
   $('launchNote').textContent = launchUI.mode === 0 ? `Летит с реальной скоростью ${Math.round(u.speed * 3.6)} км/ч от точки клика: 10 км — примерно ${fmt(10000 / u.speed)}.`
     : `Скорость реальная (${Math.round(u.speed * 3.6)} км/ч), поэтому цель появится в ${km.toFixed(1)} км от точки удара.`;
+  if (launchUI.count > 1 && swarm(u).length > 1) $('launchNote').textContent += launchUI.mode === 0 ? ' Смешанный рой стартует из одной точки: быстрые прилетят раньше.' : ' Смешанный рой: каждый тип стартует со своей дальности, чтобы все подошли одновременно.';
   $('tacHint').innerHTML = $('step').innerHTML;
 }
 /** Клик по точке мира — из 3D-вида или с тактической карты. */
@@ -85,10 +97,11 @@ function clickWorld(x: number, z: number) {
   const u = launchUI.armed; if (!u || !session) return false;
   if (launchUI.step === 0) { launchUI.tx = x; launchUI.tz = z; launchUI.step = 1; marker.position.set(x, map.heightAt(x, z) + 1, z); marker.visible = true; renderLaunch(); return true; }
   let dx = x - launchUI.tx, dz = z - launchUI.tz; const d = Math.hypot(dx, dz); if (d < 30) return true; dx /= d; dz /= d;
-  const dist = launchUI.mode === 0 ? Math.max(d, 400) : launchUI.mode * u.speed;
+  const types = launchUI.count > 1 ? swarm(u) : [u];
   for (let i = 0; i < launchUI.count; i++) {
+    const ui = types[i % types.length], dist = launchUI.mode === 0 ? Math.max(d, 400) : launchUI.mode * ui.speed;
     const k = i === 0 ? 0 : 1, lat = (Math.random() - 0.5) * 500 * k, back = Math.random() * 700 * k, sc = (Math.random() - 0.5) * 140 * k, sc2 = (Math.random() - 0.5) * 140 * k;
-    const L = { id: 0, unit: u.id, by: '', t0: 0, seed: Math.random() * 100, tx: launchUI.tx + sc, tz: launchUI.tz + sc2,
+    const L = { id: 0, unit: ui.id, by: '', t0: 0, seed: Math.random() * 100, tx: launchUI.tx + sc, tz: launchUI.tz + sc2,
       sx: launchUI.tx + dx * (dist + back) - dz * lat, sz: launchUI.tz + dz * (dist + back) + dx * lat } as Launch;
     planLaunch(L, map); session.send({ type: 'launch', launch: L });
   }
@@ -100,6 +113,14 @@ canvas.addEventListener('pointermove', e => {
   const a = aimLine.geometry.getAttribute('position') as THREE.BufferAttribute;
   a.setXYZ(0, marker.position.x, marker.position.y + 2, marker.position.z); a.setXYZ(1, p.x, p.y + 2, p.z); a.needsUpdate = true; aimLine.visible = true;
 });
+
+/** Свечение сопел: днём — только раскалённый срез, ночью — заметный факел и ореол. Материалы общие у всех копий модели. */
+function setGlow(night: number) {
+  for (const p of Object.values(protos)) p.getObjectByName('glow')?.traverse(o => {
+    const m = (o as THREE.Mesh).material as THREE.Material | undefined; if (!m) return;
+    m.opacity = o.name === 'core' ? 0.75 + 0.25 * night : o.name === 'flame' ? 0.12 + 0.5 * night : 0.1 + 0.9 * night;
+  });
+}
 
 // ---------- события сессии ----------
 function feed(t: string, cls = '') { const d = el('div', cls); d.textContent = t; $('feed').append(d); setTimeout(() => d.remove(), 9000); while ($('feed').children.length > 6) $('feed').firstChild!.remove(); }
@@ -114,7 +135,7 @@ function addDrone(L: Launch) {
   const mesh = protos[L.unit].clone(); scene.add(mesh);
   const label = el('div', 'lbl'); $('labels').append(label);
   const row = el('div', 'it'); row.dataset.type = L.unit; $('tgList').append(row);
-  const d: Drone = { L, mesh, prop: mesh.getObjectByName('prop')!, label, row, s: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 }, eta: L.impactT };
+  const d: Drone = { L, mesh, prop: mesh.getObjectByName('prop') ?? null, glow: mesh.getObjectByName('glow') ?? null, label, row, s: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 }, eta: L.impactT };
   label.onclick = row.onclick = () => follow(d);
   drones.set(L.id, d); $('targets').classList.remove('hidden');
   if (mySide() === 'defense') feed(`Воздушная тревога: ${u.name}, подлёт через ${fmt(L.impactT)}`, 'def');
@@ -405,6 +426,7 @@ function frame(nowMs: number) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (nowMs - last) / 1000); last = nowMs; frameNo++;
   U.uTime.value += dt;
+  if (session) { const now = session.now(); for (const d of drones.values()) { trajectory(d.L, map, Math.max(0, Math.min(now - d.L.t0, d.L.impactT)), d.s); d.mesh.position.set(d.s.x, d.s.y, d.s.z); } } // цели — до камеры: слежение без отставания на кадр
   cc.update(dt); const t = cc.target;
   env.update(dt, scene, cc.cam);
   U.uFogD.value = 1 / Math.max(45000, t.dist * 3.2);
@@ -415,14 +437,14 @@ function frame(nowMs: number) {
     for (const d of [...drones.values()]) {
       const tt = now - d.L.t0, u = UNITS[d.L.unit];
       if (tt >= d.L.impactT) { removeDrone(d); impact(d.L); continue; }
-      trajectory(d.L, map, Math.max(0, tt), d.s); d.eta = d.L.impactT - tt;
-      d.mesh.position.set(d.s.x, d.s.y, d.s.z); fwd.set(d.s.vx, d.s.vy, d.s.vz);
-      d.mesh.lookAt(v3.copy(d.mesh.position).add(fwd)); d.prop.rotation.z += dt * 90;
+      d.eta = d.L.impactT - tt; fwd.set(d.s.vx, d.s.vy, d.s.vz);
+      d.mesh.lookAt(v3.copy(d.mesh.position).add(fwd)); if (d.prop) d.prop.rotation.z += dt * 90;
+      if (d.glow) d.glow.scale.set(1, 1, 0.85 + 0.3 * Math.random()); // факел дрожит
       const dist = cc.cam.position.distanceTo(d.mesh.position);
       d.mesh.scale.setScalar(Math.max(1, dist / 260)); // издалека модель увеличивается, чтобы цель оставалась видимой
       const closing = -fwd.dot(v3.copy(d.mesh.position).sub(cc.cam.position).normalize());
       v3.copy(d.mesh.position).project(cc.cam);
-      heard.push({ dist, closing, pan: v3.z > 1 ? -v3.x : v3.x, dive: Math.min(1, Math.max(0, 1 - d.eta / 3.5)), seed: d.L.seed, near: u.sounds.engineNear, far: u.sounds.engineFar });
+      heard.push({ dist, closing, pan: v3.z > 1 ? -v3.x : v3.x, dive: Math.min(1, Math.max(0, 1 - d.eta / 3.5)), seed: d.L.seed, near: u.sounds.engineNear, far: u.sounds.engineFar, engine: u.engine });
       // метка всегда на экране: если цель вне кадра, прижимается к краю
       if (v3.z > 1) { v3.x = -v3.x; v3.y = -v3.y; }
       const off = v3.z > 1 || Math.abs(v3.x) > 0.94 || v3.y > 0.8 || v3.y < -0.94;
@@ -438,7 +460,7 @@ function frame(nowMs: number) {
     }
     if (frameNo % 6 === 0) $('tgCount').textContent = String(drones.size);
   }
-  sound.engines(heard);
+  sound.engines(heard); setGlow(U.uNight.value);
   if (marker.visible) marker.scale.setScalar(Math.max(12, t.dist * 0.018) * (1 + 0.08 * Math.sin(nowMs / 150)));
   destr.update(dt); landmarks.update(dt); fx.update(dt); fx.lights(t.x, t.y, t.z);
   if (!tac.open) { renderer.info.reset(); shadows?.render(renderer, t); if (post) post.render(scene, cc.cam); else renderer.render(scene, cc.cam); }

@@ -1,0 +1,92 @@
+Warfront sounds are built from these recordings (edited, layered, filtered, compressed):
+
+- Sunset Sound Effects Library (USC Cinema / Sunset Editorial), CC0 1.0, via the Internet Archive:
+  real explosions, atomic bomb recordings, incoming and overhead artillery shells,
+  PT boat rapid-fire guns and a .50 cal machine gun (the Shilka anti-aircraft gun); V-2 and small rocket
+  launches (S-400, Strela, Grad).
+  https://archive.org/details/SSE_Library_EXPLOSIONS  https://archive.org/details/SSE_Library_GUNS
+  https://archive.org/details/SSE_Library_AIRCRAFT
+- BigSoundBank.com, CC0 1.0, recordings by Joseph SARDIN: explosion (#1807, #1808), thunder (#2718),
+  excavator (#2148), fall of stone (#1022), firecracker (#1137), DJI quadcopter drone (#3551, base of the FPV
+  drone motor sound); cab sounds (0.30): car door opening (#1524), car door slam (#0655), metal box lid as a hatch
+  (#0053), pneumatic brake release (#1490), truck reverse beep (#1298). https://bigsoundbank.com
+- NASA audio (public domain; NASA does not endorse this mod): SLS test fire, Discovery STS-131 launch,
+  Atlas V launch. https://www.nasa.gov/historical-sounds/
+- Geran-2 engine: a real Shahed-136 recording over a city, zvukogram.com ("Звук Шахеда-136 в небе над городом").
+- FPV drone (close whine, distant buzz, prop wash) and Lancet loitering munition (motor, distant buzz, dive whistle,
+  impact, catapult whoosh): recordings from zvukogram.com, "Звуки дрона" ("Резкий жужжащий пролёт скоростного дрона",
+  "Скоростной квадрокоптер проносится через лес", "Проп-вош на полной мощности", "Заход кружащего ударника на цель",
+  "Далёкое жужжание в небе на патруле", "Свистящий разгон гонки в лесу").
+- Synthesized: electronic beeps, MANPADS seeker tones, rangefinder clicks and radio report, turbine whine,
+  sub-bass of explosions and gunshots, FPV motor whine layer, FPV arming beeps and goggles beep, air raid siren wail,
+  surveillance radar antenna drive.
+
+Full list with links: tools/sound_sources/SOURCES.md in the source repository.
+
+- Internet Archive "GOLD TAPE" collections, CC0 1.0 (Flamingo / fp5: turbine hiss of a real jet, bazooka ignition,
+  missile and bomb explosions): https://archive.org/details/GOLD_TAPE_08_09_10_11_Aircraft-Jets
+  https://archive.org/details/GOLD_TAPE_33_Explosions_and_War
+- Mixkit sound effects (Mixkit Sound Effects Free License, https://mixkit.co/license/#sfxFree), Flamingo / fp5:
+  "War plane loop", "Jet plane flying rumble", "Space rocket full power turbine", "Rocket ignition flames",
+  "Rocket engine ignition rumble"; S-400 missile coasting: "Space rocket traveling in distance"; THAAD (0.34): "Sci fi rocket afterburner",
+  "Space Shuttle rocket ignition start".
+  https://mixkit.co/free-sound-effects/
+- Oreshnik and S-500 (0.35): recordings from zvukogram.com — "Звук ракеты-перехватчика" (interceptor-missile-sound),
+  "Быстро летящая ракета" (a-fast-moving-rocket), "Космическая ракета, запуск" (space-rocket-rocket-launch),
+  howitzer impacts with falling rubble (howitzer-hit-and-fell-a-strong-explosion-of-rubble-and-gravel), powerful bomb
+  explosion with echo (powerful-bomb-explosion-with-destruction-and-echo): Oreshnik impact series (modelled on the
+  Dnipro strike video, 21.11.2024), falling block whistle, 77N6 cold launch and roar. https://zvukogram.com/
+- Air defence launches (0.35.4): real recordings from the BBC Sound Effects archive (RemArc licence, personal use):
+  "Rocket launcher" (00008097), "Solid fuel rocket motor." (07041216, 07041215), "84mm medium anti tank weapon fired"
+  close and distant perspective (07043196, 07043197), "RAF Hawker Siddeley Harrier, three fly overhead firing rockets"
+  (07043220): Strela, S-400, THAAD, S-500 and MANPADS launches, near and far versions. https://sound-effects.bbcrewind.co.uk/
+- Arsenal (0.36): recordings from zvukogram.com — "Запуск снаряда из ракетной установки"
+  (launching-a-projectile-from-a-rocket-launcher), "Звук запуска ракеты" (rocket-launch-sound), "Ракета — короткий
+  вылет" (rocket-2): HIMARS launch; "Боевой залп ракеты «Кобра»" (cobra-battle-sound-rocket-launches-attack): TOS-1A
+  launches; "Оглушительный шум запуска ракеты" (deafening-noise-when-the-rocket-was-launched), "Долгий запуск и полёт
+  ракеты" (long-sound-of-rocket-launch-and-flight): cruise missile vertical launch from a cell (Club-K, Typhon).
+  Air defence (0.36.1): "Выпуск боевой ракеты" (release-of-a-combat-missile), "Короткий звук запуска ракеты"
+  (short-rocket-launch-sound), "Запуск снаряда" (projectile-launch), "Звук ракеты-перехватчика": Buk, NASAMS and
+  IRIS-T SLM launches; "Зенитный комплекс Стингер" (anti-aircraft-missile-system-quotstingerquot): Stinger launch.
+  https://zvukogram.com/
+- Cruise missiles in flight (0.37.1), each with its own sound: Internet Archive "GOLD TAPE" jet recordings, CC0 1.0
+  (https://archive.org/details/GOLD_TAPE_08_09_10_11_Aircraft-Jets): B-52 fly by, constant overhead jet noise, jet high
+  overhead (Tomahawk); constant jet noise, F-105 constant whine, F-86 fast fly by (Kalibr); F-86 jet fast fly by,
+  distant jet fly by, constant jet noise (Flamingo); jet engine interior, constant jet noise (Burevestnik); jet by super
+  fast, aircraft sonic boom (Zircon). Sunset Sound Effects Library (CC0 1.0, https://archive.org/details/SSE_Library_AIRCRAFT):
+  Atlas missile launch, multiple rocket takeoffs (Zircon). Tomahawk booster: US Navy footage of the 7 April 2017 launches
+  from USS Porter and USS Ross (public domain), via NBC News on the Internet Archive
+  (https://archive.org/details/NBCNews-f_missile_launch_170406).
+- Real military launches (0.37.15), field audio of videos on the Internet Archive: Tor-M2 launch
+  (https://archive.org/details/tor-m-2-january-15th-2024), BM-30 Smerch / BM-21 Grad night salvo
+  (https://archive.org/details/ArtilleryLaunchInUkraine.BM30SmerchAndBM21GradRocketLaunchAtNight): rocket motor roar of
+  interceptors and Grad, Grad and generic launches (Geran booster again synthetic since 0.37.19).
+- Vehicles (0.37.23), BBC Sound Effects archive (https://sound-effects.bbcrewind.co.uk/, RemArc licence, personal use):
+  articulated lorry diesel (tickover, start, stop, steady run), heavy lorry climbing hill, armoured personnel carrier,
+  Chieftain tank (start, run, stop, pass), crane on caterpillar tracks, 25-ton mobile crane, hydraulic bed, winch,
+  train motor; Tomahawk flight: jet fighter passing overhead, Hawker Harrier passing over.
+- Mi-8 helicopter (0.38.1), BBC Sound Effects archive (https://sound-effects.bbcrewind.co.uk/, RemArc licence, personal use):
+  Sea King helicopter, exterior, start up (APU and turbine whine); Sea King helicopter, exterior, taxi, take off (rotor).
+- Recon drones Orlan-10 and MQ-9 Reaper (0.39.2), BBC Sound Effects archive (https://sound-effects.bbcrewind.co.uk/,
+  RemArc licence, personal use): two-stroke petrol engine driving small elevator; two-stroke band saw; Embraer
+  Bandeirante flying overhead after take-off; Bristol Britannia taxiing and taking off; compressed air line
+  (catapult). Parachute opening — synthetic.
+- Arsenal III drones FP-1 and Geran-5 (0.40), BBC Sound Effects archive (https://sound-effects.bbcrewind.co.uk/,
+  RemArc licence, personal use): single piston open cockpit aircraft passing low overhead; Piper light aircraft passing
+  overhead; Fairey Ultralite jet engine start and run; BAC 1-11 auxiliary power unit start and run up; single engine jet
+  fighter passing overhead; solid fuel rocket motor; two-stroke petrol engine driving small elevator.
+- Arsenal III missiles Neptune, Tornado-S and PrSM (0.40.1), BBC Sound Effects archive
+  (https://sound-effects.bbcrewind.co.uk/, RemArc licence, personal use): V2 rocket launching (1975); solid fuel rocket
+  motor. Tornado-S rocket launch — the BM-30 Smerch night salvo recording from Internet Archive (as for the Grad).
+- Iron Dome and Iron Beam (0.40.2), BBC Sound Effects archive (https://sound-effects.bbcrewind.co.uk/, RemArc licence,
+  personal use): solid fuel rocket motor (Tamir launch); generator running on airport apron; electrical buzzing.
+- Counter-drone (0.40.3), BBC Sound Effects archive (https://sound-effects.bbcrewind.co.uk/, RemArc licence, personal
+  use): compressed gas gun (Yolka tube launch); with the BigSoundBank quadcopter recording (CC0) for the motor spin-up.
+- Anti-aircraft guns and David's Sling (0.41.0.2): BBC Sound Effects archive (https://sound-effects.bbcrewind.co.uk/,
+  RemArc licence, personal use): «Bofors Guns, shells fired, cases falling», «Bofors Guns, barrage fired», «40mm Bofors
+  Gun shells bursting», «Shells passing overhead», solid fuel rocket motor. Internet Archive (https://archive.org/):
+  «Flugabwehrkanonenpanzer Gepard bekämpft Bodenziel» (Bundeswehr exercise 1992), «Mk 15 Phalanx CIWS» (US Navy),
+  «Supersonic Crack» (Public Domain Mark 1.0), SoundBible «Bullet whizzing by».
+
+Пуск С-400 (0.41.3.2) — настоящая запись боевых стрельб: ролик «Russian S-400 missile system in action: Triumf missile
+launch. No comment», Internet Archive, https://archive.org/details/youtube-NE-jW5Hg-pw (s400_launch_*, s500_launch_*).

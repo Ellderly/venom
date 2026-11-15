@@ -10,15 +10,17 @@ import sys, json, shutil, fnmatch
 from pathlib import Path
 
 SLOTS = {
-    'geran_near':     ['drone_engine_loop*'],
-    'geran_far':      ['geran_far_loop*'],
+    'geran_near':     ['drone_engine_loop'],
+    'geran_far':      ['geran_far_loop'],
+    'geran5_near':    ['geran5_cruise_loop'],   # ТРД вблизи: вой и гул
+    'geran5_far':     ['geran5_cruise_far'],    # реактивный гул вдали
     'explosion_near': ['explosion_near_*'],
     'explosion_far':  ['explosion_far_*'],
-    'debris':         ['debris_impact_*'],
+    'debris':         ['debris_impact*'],
     'siren':          ['siren_wail*'],
 }
 EXT = {'.ogg', '.mp3', '.wav'}
-CREDITS = ['CREDITS.md', 'CREDITS.txt', 'LICENSE', 'LICENSE.md']
+CREDITS = ['credits.txt', 'SOURCES.md', 'CREDITS.md', 'CREDITS.txt', 'LICENSE', 'LICENSE.md']
 
 
 def main():
@@ -27,7 +29,8 @@ def main():
     src = Path(sys.argv[1])
     out = Path(sys.argv[2] if len(sys.argv) > 2 else 'public/sounds')
     out.mkdir(parents=True, exist_ok=True)
-    files = sorted(p for p in src.rglob('*') if p.suffix.lower() in EXT and '.git' not in p.parts and 'node_modules' not in p.parts)
+    skip = {'.git', 'node_modules', 'build', 'sound_sources'}  # исходные записи warfront не нужны — только готовые звуки мода
+    files = sorted(p for p in src.rglob('*') if p.suffix.lower() in EXT and not skip & set(p.parts))
     manifest, total = {}, 0
     for slot, patterns in SLOTS.items():
         found = [p for p in files if any(fnmatch.fnmatch(p.stem.lower(), pat) for pat in patterns)]
@@ -43,7 +46,7 @@ def main():
         print(f'{slot:16} {len(names)} файл(ов)' + ('' if names else '  — НЕ НАЙДЕНО, останется синтез'))
     for name in CREDITS:  # авторы и лицензии едут вместе со звуками
         for p in src.rglob(name):
-            if '.git' in p.parts or 'node_modules' in p.parts:
+            if {'.git', 'node_modules', 'build'} & set(p.parts):
                 continue
             shutil.copy2(p, out / ('WARFRONT_' + name)); print('лицензии:', p); break
     (out / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + '\n', encoding='utf8')

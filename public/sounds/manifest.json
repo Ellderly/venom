@@ -1,1 +1,31 @@
-{}
+{
+ "geran_near": [
+  "drone_engine_loop.ogg"
+ ],
+ "geran_far": [
+  "geran_far_loop.ogg"
+ ],
+ "geran5_near": [
+  "geran5_cruise_loop.ogg"
+ ],
+ "geran5_far": [
+  "geran5_cruise_far.ogg"
+ ],
+ "explosion_near": [
+  "explosion_near_1.ogg",
+  "explosion_near_2.ogg",
+  "explosion_near_3.ogg",
+  "explosion_near_4.ogg"
+ ],
+ "explosion_far": [
+  "explosion_far_1.ogg",
+  "explosion_far_2.ogg",
+  "explosion_far_3.ogg"
+ ],
+ "debris": [
+  "debris_impact.ogg"
+ ],
+ "siren": [
+  "siren_wail.ogg"
+ ]
+}

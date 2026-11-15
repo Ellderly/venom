@@ -1,15 +1,14 @@
-// Звук. По умолчанию всё синтезируется (WebAudio). Если в папке sounds/ лежат реальные записи
-// и они перечислены в sounds/list.json (geran — зацикленный мотор, explosion — взрыв, siren — сирена), используются они.
 // Звук. Записи берутся из sounds/manifest.json (слот → список файлов-вариантов); чего там нет — синтезируется (WebAudio).
 // Манифест пишет tools/import_sounds.py. Юниты ссылаются на слоты по имени (units.ts → sounds).
 type Chain = { src: AudioBufferSourceNode; gain: GainNode; lp: BiquadFilterNode };
-type Voice = { key: string; near: Chain; far: Chain; pan: StereoPannerNode };
-export interface Heard { dist: number; closing: number; pan: number; dive: number; seed: number; near?: string; far?: string }
+type Voice = { key: string; near: Chain; far: Chain; pan: StereoPannerNode; nk: number; fk: number };
+export type Engine = 'piston' | 'jet';
+export interface Heard { dist: number; closing: number; pan: number; dive: number; seed: number; near?: string; far?: string; engine?: Engine }
 export interface BlastSounds { blastNear?: string; blastFar?: string; debris?: string }
 
 export class Sound {
   private ctx: AudioContext | null = null; private master!: GainNode; private wet!: GainNode;
-  private voices: Voice[] = []; private engBuf!: AudioBuffer; private boomBuf!: AudioBuffer; private crackBuf!: AudioBuffer; private debrisBuf!: AudioBuffer;
+  private voices: Voice[] = []; private engBuf!: AudioBuffer; private jetBuf!: AudioBuffer; private level = new Map<AudioBuffer, number>(); private boomBuf!: AudioBuffer; private crackBuf!: AudioBuffer; private debrisBuf!: AudioBuffer;
   private slots: Record<string, AudioBuffer[]> = {};
   volume = 0.7;
   /** Сколько записей загружено — показывается в настройках. */
@@ -26,7 +25,7 @@ export class Sound {
       const ir = c.createBuffer(2, c.sampleRate * 3.2, c.sampleRate);
       for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); let lp = 0; for (let i = 0; i < d.length; i++) { const t = i / d.length; lp += ((Math.random() * 2 - 1) - lp) * (0.5 - 0.42 * t); d[i] = lp * Math.pow(1 - t, 2.6) * (i < 600 ? i / 600 : 1); } }
       const conv = c.createConvolver(); conv.buffer = ir; this.wet = c.createGain(); this.wet.gain.value = 0.55; this.wet.connect(conv); conv.connect(this.master);
-      this.engBuf = this.makeEngine(c); this.makeBlast(c);
+      this.engBuf = this.makeEngine(c); this.jetBuf = this.makeJet(c); this.makeBlast(c);
       for (let i = 0; i < 4; i++) this.voices.push(this.makeVoice(c, '', this.engBuf, this.engBuf));
       void this.loadRecorded();
     } catch { this.ctx = null; }
@@ -42,6 +41,12 @@ export class Sound {
       }
     }));
     for (const v of this.voices) v.key = '?'; // голоса пересоберутся с записями при следующем кадре
+  }
+  /** Множитель громкости петли: записи сведены с разным уровнем, а моторы должны звучать сопоставимо. */
+  private norm(b: AudioBuffer) {
+    let k = this.level.get(b); if (k !== undefined) return k;
+    const d = b.getChannelData(0); let sum = 0, n = 0; for (let i = 0; i < d.length; i += 16) { sum += d[i] * d[i]; n++; }
+    k = Math.min(2.5, Math.max(0.4, 0.3 / Math.max(0.01, Math.sqrt(sum / n)))); this.level.set(b, k); return k;
   }
   private pick(slot?: string) { const a = slot ? this.slots[slot] : undefined; return a?.length ? a[(Math.random() * a.length) | 0] : null; }
 
@@ -63,6 +68,21 @@ export class Sound {
     const out = c.createBuffer(1, len - fade, sr); out.copyToChannel(d.subarray(0, len - fade), 0); return out;
   }
 
+  /** Турбореактивный двигатель: свист компрессора (два тона с лёгкой дрожью), шипение струи и низкий гул. */
+  private makeJet(c: AudioContext) {
+    const sr = c.sampleRate, len = Math.floor(sr * 3.2), buf = c.createBuffer(1, len, sr), d = buf.getChannelData(0);
+    let low = 0, mid = 0, hi = 0, p1 = 0, p2 = 0;
+    for (let i = 0; i < len; i++) {
+      const s = i / sr, w = Math.random() * 2 - 1;
+      low += (w - low) * 0.004; mid += (w - mid) * 0.09; hi += (w - hi) * 0.5;                 // гул, рёв струи, шипение
+      p1 += 6.283 * 2350 * (1 + 0.004 * Math.sin(6.283 * 0.9 * s)) / sr; p2 += 6.283 * 3720 * (1 + 0.003 * Math.sin(6.283 * 1.3 * s + 1)) / sr;
+      const flutter = 1 + 0.12 * Math.sin(6.283 * 5.5 * s) * Math.sin(6.283 * 0.7 * s);
+      d[i] = Math.tanh((low * 14 + (mid - low) * 1.5 * flutter + (hi - mid) * 0.55 + 0.07 * Math.sin(p1) + 0.04 * Math.sin(p2)) * 1.3) * 0.7;
+    }
+    const fade = Math.floor(sr * 0.25); for (let i = 0; i < fade; i++) { const k = i / fade; d[i] = d[i] * k + d[len - fade + i] * (1 - k); } // бесшовная петля
+    const out = c.createBuffer(1, len - fade, sr); out.copyToChannel(d.subarray(0, len - fade), 0); return out;
+  }
+
   private makeChain(c: AudioContext, buf: AudioBuffer, out: AudioNode): Chain {
     const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
     const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 4000; lp.Q.value = 0.4;
@@ -75,7 +95,7 @@ export class Sound {
   private makeVoice(c: AudioContext, key: string, near: AudioBuffer, far: AudioBuffer): Voice {
     const pan = c.createStereoPanner(); pan.connect(this.master);
     const send = c.createGain(); send.gain.value = 0.25; pan.connect(send); send.connect(this.wet);
-    return { key, pan, near: this.makeChain(c, near, pan), far: this.makeChain(c, far, pan) };
+    return { key, pan, near: this.makeChain(c, near, pan), far: this.makeChain(c, far, pan), nk: this.norm(near), fk: this.norm(far) };
   }
   private dropVoice(v: Voice) { for (const ch of [v.near, v.far]) { try { ch.src.stop(); } catch { /* уже остановлен */ } ch.gain.disconnect(); } v.pan.disconnect(); }
 
@@ -100,20 +120,21 @@ export class Sound {
     for (let i = 0; i < this.voices.length; i++) {
       let v = this.voices[i]; const h = list[i];
       if (!h || h.dist > 9000) { v.near.gain.gain.setTargetAtTime(0, t, 0.2); v.far.gain.gain.setTargetAtTime(0, t, 0.2); continue; }
-      const key = `${h.near ?? ''}|${h.far ?? ''}`;
+      const jet = h.engine === 'jet', key = `${h.near ?? ''}|${h.far ?? ''}|${h.engine ?? ''}`;
       if (v.key !== key) { // другой тип цели или догрузились записи
-        const nb = this.slots[h.near ?? '']?.[0] ?? this.engBuf, fb = this.slots[h.far ?? '']?.[0] ?? nb;
+        const nb = this.slots[h.near ?? '']?.[0] ?? (jet ? this.jetBuf : this.engBuf), fb = this.slots[h.far ?? '']?.[0] ?? nb;
         this.dropVoice(v); v = this.voices[i] = this.makeVoice(c, key, nb, fb);
       }
-      const realFar = !!this.slots[h.far ?? '']?.length, x = sm(350, 1600, h.dist);
-      const g = Math.min(1, 140 / Math.max(140, h.dist)) * (0.5 + 0.5 * h.dive);
-      v.near.gain.gain.setTargetAtTime(g * 0.9 * (1 - x) * (1 - h.dist / 9000), t, 0.12);
+      // реактивный слышен дальше и «накрывает» позже: слои меняются на большем расстоянии
+      const realFar = !!this.slots[h.far ?? '']?.length, ref = jet ? 230 : 140, x = jet ? sm(500, 2200, h.dist) : sm(350, 1600, h.dist);
+      const g = Math.min(1, ref / Math.max(ref, h.dist)) * (jet ? 0.75 + 0.25 * h.dive : 0.5 + 0.5 * h.dive);
+      v.near.gain.gain.setTargetAtTime(g * 0.9 * v.nk * (1 - x) * (1 - h.dist / 9000), t, 0.12);
       // дальний слой: настоящая запись «над городом» слышна дальше и не глушится фильтром
-      v.far.gain.gain.setTargetAtTime(x * (realFar ? 0.55 * Math.min(1, 1800 / h.dist) : g * 0.9) * (1 - sm(5000, 9000, h.dist)), t, 0.25);
-      v.near.lp.frequency.setTargetAtTime(Math.max(350, 7000 * Math.exp(-h.dist / 900)), t, 0.2);
+      v.far.gain.gain.setTargetAtTime(x * v.fk * (realFar ? 0.55 * Math.min(1, (jet ? 2600 : 1800) / h.dist) : g * 0.9) * (1 - sm(5000, 9000, h.dist)), t, 0.25);
+      v.near.lp.frequency.setTargetAtTime(Math.max(350, (jet ? 11000 : 7000) * Math.exp(-h.dist / (jet ? 1100 : 900))), t, 0.2);
       v.far.lp.frequency.setTargetAtTime(realFar ? Math.max(900, 6000 * Math.exp(-h.dist / 4000)) : Math.max(300, 2500 * Math.exp(-h.dist / 1500)), t, 0.2);
-      const doppler = 1 + Math.max(-0.14, Math.min(0.14, h.closing / 340));
-      const rate = (0.96 + (h.seed % 1) * 0.08) * doppler * (1 + 0.42 * h.dive); // в пикировании мотор «воет»
+      const dmax = jet ? 0.32 : 0.14, doppler = 1 + Math.max(-dmax, Math.min(dmax, h.closing / 340));
+      const rate = (0.96 + (h.seed % 1) * 0.08) * doppler * (1 + (jet ? 0.1 : 0.42) * h.dive); // в пикировании поршневой мотор «воет», турбина почти не меняет тон
       v.near.src.playbackRate.setTargetAtTime(rate, t, 0.15); v.far.src.playbackRate.setTargetAtTime(rate, t, 0.15);
       v.pan.pan.setTargetAtTime(Math.max(-0.9, Math.min(0.9, h.pan)), t, 0.1);
     }

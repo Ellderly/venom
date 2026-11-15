@@ -10,6 +10,7 @@ export class CityCamera {
   private keys = new Set<string>();
   private drag: { btn: number; x: number; y: number; moved: number } | null = null;
   follow: (() => THREE.Vector3 | null) | null = null;
+  private caught: unknown = null; private chase = 0; private chased: unknown = null; // цель, которую камера уже догнала
   shake = 0;
   locked = false; // открыто окно или карта — клавиши камеры не действуют
   get yawNow() { return this.syaw; }
@@ -77,7 +78,11 @@ export class CityCamera {
     if (f) { this.tx = f.x; this.tz = f.z; ty = f.y; } else if (this.follow) this.follow = null;
     this.tx = Math.min(m.x1 + 30000, Math.max(m.x0 - 30000, this.tx)); this.tz = Math.min(m.z1 + 30000, Math.max(m.z0 - 30000, this.tz));
     const a = 1 - Math.exp(-dt * (f ? 30 : 12));
-    this.sx += (this.tx - this.sx) * a; this.sz += (this.tz - this.sz) * a; this.sd += (this.dist - this.sd) * a;
+    this.chase = f && this.chased === this.follow ? this.chase + dt : 0; this.chased = this.follow; // догоняем плавно, но не дольше полсекунды — иначе быструю цель при низкой частоте кадров не поймать
+    if (!f || this.caught !== this.follow) this.caught = f && (this.chase > 0.5 || Math.hypot(this.tx - this.sx, this.tz - this.sz) < 80) ? this.follow : null;
+    if (f && this.caught) { this.sx = this.tx; this.sz = this.tz; } // догнали цель — держим точно, иначе быстрая цель уходит из кадра
+    else { this.sx += (this.tx - this.sx) * a; this.sz += (this.tz - this.sz) * a; }
+    this.sd += (this.dist - this.sd) * a;
     this.syaw += (this.yaw - this.syaw) * a; this.sp += (this.pitch - this.sp) * a;
     this.sy += ((ty ?? this.map.heightAt(this.sx, this.sz)) - this.sy) * a;
     const c = this.cam, ch = Math.cos(this.sp) * this.sd;

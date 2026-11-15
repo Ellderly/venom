@@ -9,6 +9,7 @@ export class CardView {
   private r: THREE.WebGLRenderer | null = null; private canvas = document.createElement('canvas');
   private scene = new THREE.Scene(); private cam = new THREE.PerspectiveCamera(32, 330 / 220, 0.1, 80); private model: THREE.Object3D | null = null;
   host: HTMLElement | null = null; unit: UnitDef | null = null;
+  private built: Record<string, THREE.Object3D | null> = {}; // модель строится один раз при первом показе карточки
 
   constructor(private models: Record<string, () => THREE.Object3D>) {
     this.canvas.width = 660; this.canvas.height = 440;
@@ -18,7 +19,7 @@ export class CardView {
   show(host: HTMLElement, u: UnitDef, actions: CardAction[]) {
     this.r ??= new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
     if (this.model) this.scene.remove(this.model);
-    this.model = this.models[u.id]?.() ?? null;
+    this.model = (this.built[u.id] ??= this.models[u.id]?.() ?? null);
     if (this.model) { // камера подбирается по размеру модели
       this.scene.add(this.model); const s = new THREE.Box3().setFromObject(this.model).getBoundingSphere(new THREE.Sphere()).radius;
       this.cam.position.set(0, s * 0.85, s * 2.35); this.cam.lookAt(0, 0, 0);
